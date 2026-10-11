@@ -260,9 +260,9 @@ const CODEX=[
  {id:'sniper',name:'Redline',act:2,role:'PRECISION // LASER',color:'#ff737c',desc:'Fixes a laser bearing and marks the attack line before firing. Destroying its hull cancels the beam.',tags:['Telegraphed beam','Long range']},
  {id:'bulwark',name:'Bulwark',act:3,role:'HEAVY // BARRAGE',color:'#d59eff',desc:'Armoured assault craft. Advances slowly and releases heavy fanned volleys with little concern for incoming fire.',tags:['Armoured','Spread fire']},
  {id:'obelisk',name:'Obelisk',act:3,role:'ARTILLERY // RADIAL',color:'#ff91aa',desc:'An anchored battery that launches radial shot formations. Find the open angle before the ring reaches you.',tags:['Radial attack','Heavy hull']},
- {id:'needle',name:'Needle',act:4,role:'SEVERANCE // SKIRMISHER',color:'#c2a2ff',desc:'A tiny, evasive craft with fast sideways movement. Releases paired violet bolts while orbiting the pilot.',tags:['Tiny target','Lateral drift']},
- {id:'prism',name:'Prism',act:4,role:'SEVERANCE // ARRAY',color:'#84dcff',desc:'A faceted emitter that releases five-shot radial patterns while strafing. Precision beats raw firepower.',tags:['Five-way burst','Strafe']},
- {id:'vesper',name:'Vesper',act:4,role:'SEVERANCE // ASSAULT',color:'#ffd0ef',desc:'Drifts and swerves toward its quarry while discharging narrow triple salvos. Its corrections are deceptive.',tags:['Triple volley','Evasive']},
+ {id:'needle',name:'Needle',act:4,role:'SEVERANCE // SKIRMISHER',color:'#c2a2ff',desc:'A tiny, evasive craft with fast sideways movement. Releases increasingly frequent violet bolt fans while orbiting the pilot.',tags:['Tiny target','Lateral drift']},
+ {id:'prism',name:'Prism',act:4,role:'SEVERANCE // ARRAY',color:'#84dcff',desc:'A faceted emitter that releases five- and six-shot radial patterns while strafing. Precision beats raw firepower.',tags:['Five-way burst','Strafe']},
+ {id:'vesper',name:'Vesper',act:4,role:'SEVERANCE // ASSAULT',color:'#ffd0ef',desc:'Drifts and swerves toward its quarry while discharging faster, narrow three- and four-shot salvos. Its corrections are deceptive.',tags:['Triple volley','Evasive']},
  {id:'boss1',name:'The Custodian',act:1,role:'WARDEN // GATEKEEPER',color:'#ff94cc',desc:'A rotating gatekeeper whose four locking arms pivot to mark aimed laser paths. Read its charged gate lines before they close.',tags:['Boss','Act I']},
  {id:'boss2',name:'Mirror Engine',act:2,role:'WARDEN // REFLECTION',color:'#a6a2ff',desc:'Twin emitters trade immediate fans and delayed reflections. Its mirrored attack timing becomes less predictable as the core desynchronizes.',tags:['Boss','Act II']},
  {id:'boss3',name:'The Silence',act:3,role:'WARDEN // COLLAPSE',color:'#ff8b92',desc:'Discards armour as hostile blades and lays timed bomb sweeps and enclosing mine rings. Its exposed reactor struggles as the last of its power fades.',tags:['Boss','Act III']},
@@ -738,11 +738,11 @@ function killEnemy(e){
 const ENEMY_BASE_STATS={wisp:[15,100,6,13,55,'#fb7fba'],shooter:[27,66,6,16,115,'#ffb87d'],charger:[35,97,5,15,100,'#f68fff'],bulwark:[98,49,5,26,250,'#d59eff'],splitter:[36,79,5,17,145,'#83f6c6'],sniper:[28,43,3,18,175,'#ff737c'],weaver:[39,115,5,17,165,'#66e6fb'],spinner:[30,58,5,19,185,'#a995ff'],corsair:[39,105,5,19,170,'#ffd079'],obelisk:[62,37,4,22,220,'#ff91aa'],interceptor:[12,385,24,12,100,'#ff686e'],needle:[22,164,0,14,140,'#c2a2ff'],prism:[46,72,0,20,210,'#84dcff'],vesper:[26,118,0,16,155,'#ffd0ef']};
 const NORMAL_ENEMY_HP=(type,act,difficulty)=>{
  const stats=ENEMY_BASE_STATS[type];
- return stats[0]*(act===4?1+difficulty*.25:1+(act-1)*.68+difficulty*.30);
+ return stats[0]*(act===4?1.20+difficulty*.25:1+(act-1)*.68+difficulty*.30);
 };
 function makeEnemy(type,x,y){
  const act=Math.ceil(cycle/4),base=ENEMY_BASE_STATS[type],stats=[base[0],base[1]+act*base[2],base[3],base[4],base[5]];
- const scaleHp=act===4?1+threat*.25:(1+(act-1)*.68+threat*.30);
+ const scaleHp=act===4?1.20+Math.max(0,cycle-13)*.08+threat*.25:(1+(act-1)*.68+threat*.30);
  return {id:Math.random(),type,x,y,vx:0,vy:0,hp:stats[0]*scaleHp,maxHp:stats[0]*scaleHp,speed:stats[1]*(1+threat*.11),r:stats[2],value:stats[3],color:stats[4],phase:rand(0,TAU),fireCd:rand(.8,2),dashCd:rand(1.5,3.5),aimAngle:0,windup:0,chargeVx:0,chargeVy:0,flash:0,dead:false,age:0,slow:0,laser:null,volley:0,heading:0,baseHeading:0,motionVX:0,motionVY:0};
 }
 function roomNumber(n=cycle){return n-Math.floor(n/4)}
@@ -760,6 +760,9 @@ function spawnEnemy(type,planned=false){
   else y=player.y<vh/2?vh-edge:edge;
  }
  const e=makeEnemy(type,x,y);e.roomTarget=planned;
+ // Severance chambers ramp up: quick evasive foes, not just extra free-heal kills.
+ if(cycle>=13&&cycle<=15){e.speed*=1.06+(cycle-13)*.06;e.fireCd*=.84}
+
  if(type==='interceptor'){
   // Lock to the pilot's position at launch. After ignition the missile can bend
   // by no more than ten degrees TOTAL, rather than homing indefinitely.
@@ -828,7 +831,7 @@ function registerDirectHit(p){
  p.repairCredited=true;player.repairHits++;
  if(player.repairHits>=15){
   player.repairHits-=15;
-  const recovered=Math.min(5,player.maxHp-player.hp);
+  const recovered=Math.min(3,player.maxHp-player.hp);
   if(recovered>0){player.hp+=recovered;floatText(player.x,player.y-35,'+'+Math.round(recovered)+' HULL','#aeffc9',19);addParticles(player.x,player.y,'#9dfec3',11,.6);sfx('heal',.72)}
  }
 }
@@ -865,7 +868,7 @@ const upgrades=[
  {id:'novaKill',symbol:'✣',name:'KILL CASCADE',tag:'CIRCUIT',rarity:'RARE',max:2,desc:'Defeated enemies release a chain-reaction shockwave.',apply(){player.killNova++}},
  {id:'frenzy',symbol:'⬡',name:'BLOOD CIRCUIT',tag:'CIRCUIT',rarity:'COMMON',max:3,desc:'Kills give a temporary 16% damage boost per rank.',apply(){player.frenzy++}},
  {id:'leech',symbol:'✚',name:'RECLAIM PROTOCOL',tag:'CIRCUIT',rarity:'COMMON',max:2,desc:'Every fifth kill restores 4% resonance per rank. Power earned through aggression.',apply(){player.leech++}},
- {id:'repair',symbol:'✙',name:'LIFEWEAVE CIRCUIT',tag:'CIRCUIT',rarity:'COMMON',max:1,desc:'Every 15 player shots that hit a target restore 5 hull, up to 100. Missing shots and echo fire do not count.',apply(){player.repair=1;player.repairHits=0}},
+ {id:'repair',symbol:'✙',name:'LIFEWEAVE CIRCUIT',tag:'CIRCUIT',rarity:'COMMON',max:1,desc:'Every 15 player shots that hit a target restore 3 hull, up to 100. Missing shots and echo fire do not count.',apply(){player.repair=1;player.repairHits=0}},
  {id:'orb',symbol:'❖',name:'CAPACITOR BANK',tag:'TEMPORAL',rarity:'COMMON',max:3,desc:'All sources generate +35% resonance per rank.',apply(){player.resPower+=.35}},
  {id:'duration',symbol:'∞',name:'DEEP RESONANCE',tag:'TEMPORAL',rarity:'RARE',max:2,desc:'Time dilation lasts +2.2 seconds and refills immediately.',apply(){player.resDurationBoost+=2.2;player.res=100}},
  {id:'pulseShot',symbol:'⊛',name:'QUANTUM AMPLIFIER',tag:'TEMPORAL',rarity:'RARE',max:2,desc:'Shots during resonance deal +40% damage per rank.',apply(){player.resShot+=.4}},
@@ -1026,7 +1029,7 @@ function beginSeverance(){
  if(state!=='severance')return;
  $('severOverlay').classList.add('hidden');
  cycle=12;enterEncounter(true);
- setToast('ARCHIVE LOST // DEFEAT HOSTILES TO RESTORE 5 HULL',3.8);
+ setToast('ARCHIVE LOST // DEFEAT HOSTILES TO RESTORE 2 HULL',3.8);
  setTouchVisible();
 }
 // Private boss practice shortcut: hold Shift + U and press F.
@@ -1858,20 +1861,36 @@ function step(dt){
  if(bossRoom||!roomPurging)hazardClock-=dt*slow;
  if((bossRoom||!roomPurging)&&hazardClock<=0){
   if(!bossRoom&&cycle>=3&&act<4){let n=(act>=2?2:1)+threat;for(let k=0;k<n;k++){let px=clamp(player.x+rand(-180,180),70,vw-70),py=clamp(player.y+rand(-140,140),85,vh-75);addHazard(px,py,rand(78,113),1.45)}}
-  hazardClock=bossRoom?rand(9,13):rand(7.5,11.5)-threat*.65;
+  if(!bossRoom&&cycle>=13&&cycle<=15){
+   // Severance rails are telegraphed across the *whole* arena. They briefly
+   // interrupt a kiting route instead of planting unavoidable bombs on the pilot.
+   const cross=(cycle===15&&Math.floor(cycleTime/8)%3===1);
+   const vertical=(Math.floor(cycleTime/6)+cycle)%2===0;
+   const lead=.32,warning=1.65;
+   const x=clamp(player.x+input.dx*player.speed*lead,55,vw-55);
+   const y=clamp(player.y+input.dy*player.speed*lead,65,vh-65);
+   if(vertical)addHazard(x,0,11,warning,'line',{x,y:vh});
+   else addHazard(0,y,11,warning,'line',{x:vw,y});
+   // Occasionally split the third chamber in both axes, with a longer warning.
+   if(cross){
+    if(vertical)addHazard(0,clamp(y+110,65,vh-65),11,warning+.25,'line',{x:vw,y:clamp(y+110,65,vh-65)});
+    else addHazard(clamp(x+130,55,vw-55),0,11,warning+.25,'line',{x:clamp(x+130,55,vw-55),y:vh});
+   }
+  }
+  hazardClock=bossRoom?rand(9,13):act===4?rand(13.0,14.8)-(cycle-13)*2.2-threat*.35:rand(7.5,11.5)-threat*.65;
  }
  for(let e of enemies){
   if(e.dead)continue;const priorX=e.x,priorY=e.y;let ed=dt*slow;e.age+=ed;e.flash=Math.max(0,e.flash-dt*5);e.slow=Math.max(0,(e.slow||0)-dt);
   let dx=player.x-e.x,dy=player.y-e.y,d=hyp(dx,dy)||1,nx=dx/d,ny=dy/d,vx=nx,vy=ny;
   if(e.type==='needle'){
    vx=nx*.5-ny*.86;vy=ny*.5+nx*.86;e.fireCd-=ed;
-   if(e.fireCd<=0){const a=Math.atan2(dy,dx);enemyFire(e.x,e.y,a,240,2,.31,'#bda1ff',4);e.fireCd=rand(1.8,2.35)-threat*.08}
+   if(e.fireCd<=0){const a=Math.atan2(dy,dx);enemyFire(e.x,e.y,a,245+(cycle-13)*10,cycle>=14?3:2,.26,'#bda1ff',4);e.fireCd=rand(1.63,2.10)-(cycle-13)*.14-threat*.08}
   }else if(e.type==='prism'){
    vx=nx*.34+ny*.21;vy=ny*.34-nx*.21;e.fireCd-=ed;
-   if(e.fireCd<=0){const a=e.age*.6+e.phase;for(let q=0;q<5;q++)enemyFire(e.x,e.y,a+q*TAU/5,170,1,0,'#87d9ff',4);e.fireCd=rand(2.6,3.3)}
+   if(e.fireCd<=0){const a=e.age*.6+e.phase,n=cycle===15?6:5;for(let q=0;q<n;q++)enemyFire(e.x,e.y,a+q*TAU/n,178+(cycle-13)*12,1,0,'#87d9ff',4);e.fireCd=rand(2.35,3.03)-(cycle-13)*.23}
   }else if(e.type==='vesper'){
    vx=nx*.75+ny*Math.sin(e.age*1.5+e.phase)*.45;vy=ny*.75-nx*Math.sin(e.age*1.5+e.phase)*.45;e.fireCd-=ed;
-   if(e.fireCd<=0){enemyFire(e.x,e.y,Math.atan2(dy,dx),305,3,.18,'#ffb7e8',4);e.fireCd=rand(2.2,2.65)}
+   if(e.fireCd<=0){enemyFire(e.x,e.y,Math.atan2(dy,dx),309+(cycle-13)*14,cycle===15?4:3,.16,'#ffb7e8',4);e.fireCd=rand(2.05,2.53)-(cycle-13)*.18}
   }else if(e.type==='interceptor'){
    // Telegraph, then accelerate toward the originally acquired bearing.
    // The entire charge is restricted to a 10-degree steering cone.
