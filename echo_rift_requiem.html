@@ -118,6 +118,14 @@
 #adminConfirm{margin-top:17px;border:1px solid #eea3b477;background:linear-gradient(120deg,#45233799,#200f2488);padding:16px}.adminConfirmTitle{font:800 13px ui-monospace,monospace;color:#ffe0e7}.adminConfirm p{color:#c1a8b4;font:11px/1.6 ui-monospace,monospace;margin:8px 0 15px}.adminConfirmBtns{display:flex;gap:9px;flex-wrap:wrap}.adminConfirmBtns button{padding:10px 15px;background:#243347;color:#e9f7ff;border:1px solid #7691a5;font:800 10px ui-monospace,monospace}.adminConfirmBtns .confirmDanger{background:#8d3b55;border-color:#e497ab;color:white}
 @media(max-width:690px){.adminBossGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.adminBoss canvas{height:73px;width:80px}.adminBoss{padding:8px;gap:5px}.adminActions{grid-template-columns:1fr}.adminSection{margin-top:17px}.adminHeader{padding-bottom:14px}.adminShell{max-height:95dvh}}
 
+
+/* MENU EASTER EGG // Same neon frame language as the owner console. */
+#helloOverlay{z-index:45;background:rgba(2,6,18,.94);backdrop-filter:blur(12px)}
+.helloShell{width:min(680px,100%);min-height:clamp(240px,44vh,380px);display:flex;align-items:center;justify-content:center;overflow:visible}
+.helloWord{font-size:clamp(68px,17vw,175px);font-weight:900;letter-spacing:-.085em;line-height:1.12;color:#dbfaff;text-shadow:0 0 44px #71eaff66,0 0 95px #71eaff20;text-align:center}
+.helloClose{position:absolute;right:16px;top:14px;min-width:43px;min-height:43px;display:grid;place-items:center;background:#122b3d;border:1px solid #7bb6d066;color:#d7efff;font:800 27px/1 ui-monospace,monospace}
+.helloClose:hover{border-color:#abedff;background:#1e4257}
+
 /* SFX slider: precise input, understated neon telemetry styling. */
 .sfxControl{flex:0 0 210px;width:210px;min-width:150px;max-width:48%;padding:3px 1px 0}
 .sfxTopline{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px}
@@ -198,6 +206,13 @@
   ===============================================================
 -->
 
+<!-- Menu-only B shortcut. Deliberately separate from the owner test console. -->
+<div id="helloOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Hello">
+ <div class="adminShell helloShell">
+  <button id="helloClose" class="helloClose" type="button" aria-label="Close">×</button>
+  <div class="helloWord">hello</div>
+ </div>
+</div>
 <!-- Hidden developer utility. Access is intentionally absent from the public menu. -->
 <div id="adminOverlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Private test console">
  <div class="adminShell">
@@ -2249,6 +2264,20 @@ function closeCodex(){$('codexOverlay').classList.add('hidden');$('codexBtn').fo
 $('codexBtn').onclick=openCodex;$('codexClose').onclick=closeCodex;
 for(const b of $('codexFilters').querySelectorAll('.codexFilter'))b.onclick=()=>{codexFilter=b.dataset.filter;for(const t of $('codexFilters').querySelectorAll('.codexFilter'))t.classList.toggle('active',t===b);refreshCodex()};
 
+/* Menu-only B-key surprise. Game simulation and owner console remain unchanged. */
+function openHello(){
+ if(state!=='menu'||!$('codexOverlay').classList.contains('hidden')||!$('adminOverlay').classList.contains('hidden'))return;
+ $('helloOverlay').classList.remove('hidden');
+ $('helloClose').focus();
+}
+function closeHello(){
+ if($('helloOverlay').classList.contains('hidden'))return;
+ $('helloOverlay').classList.add('hidden');
+ $('startBtn').focus();
+}
+$('helloClose').onclick=closeHello;
+$('helloOverlay').addEventListener('pointerdown',e=>{if(e.target===$('helloOverlay'))closeHello()});
+
 /* LOCAL OWNER QA PANEL. Secret key chord opens this UI, not a direct boss teleport.
    Only explicit button activation mutates saves or starts practice. */
 let adminReturnState='menu';
@@ -2890,6 +2919,13 @@ addEventListener('keydown',e=>{let k=e.key.toLowerCase();if([' ','arrowup','arro
  // Do not send the F key to the regular auto-fire handler.
  if(k==='f'&&e.shiftKey&&keys.has('u')){e.preventDefault();if(state==='admin')closeAdmin();else openAdmin();return}
  if(state==='admin')return;
+ // The easter egg takes keyboard focus until dismissed.
+ if(!$('helloOverlay').classList.contains('hidden')){
+  if(k==='b'||k==='escape'){e.preventDefault();closeHello()}
+  else if(k!=='tab')e.preventDefault();
+  return;
+ }
+ if(k==='b'&&state==='menu'&&$('codexOverlay').classList.contains('hidden')){e.preventDefault();openHello();return}
  if(k==='p'||k==='escape'){if(state==='playing'||state==='paused')pause();return}if(k==='m'){toggleMute();setToast('SOUND '+(muted?'OFF':'ON'),1.2)}if(state==='menu'&&!$('codexOverlay').classList.contains('hidden'))return;if(state==='menu'&&(k==='enter'||k===' ')){reset();return}if(state==='upgrade'&&k==='r'){reroll();return}if(state==='upgrade'&&/^[1-9]$/.test(k)){chooseUpgrade(Number(k)-1);return}if(state==='playing'){if(k===' '||k==='shift')doDash();if(k==='e')doPulse();if(k==='f')toggleAuto()}else if(state==='end'&&(k==='enter'||k===' '))reset()});addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 function toggleAuto(){autoFire=!autoFire;resetAutoAim();$('touchAuto').style.borderColor=autoFire?'#a4ffb8':'#8ac6e8a0';$('touchAuto').style.color=autoFire?'#a4ffb8':'#e0f8ff';setToast('AUTO-AIM / FIRE '+(autoFire?'ENABLED':'DISABLED'),1.6)}
 function setTouchVisible(){ $('touchControls').style.display=touchMode&&state==='playing'?'block':'none'}
