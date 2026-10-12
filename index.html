@@ -22,12 +22,14 @@
 /*
  * REQUIEM GitHub loader — install ONCE as /var/www/html/game/index.html.
  * Edit only these settings to match your PUBLIC GitHub repository.
- * Commit the standalone game HTML at the path specified by GAME_FILE.
+ * Commit the game HTML and separate MOD_API_FILE at the repository root.
+ * The loader downloads both files, then uses a blob script for the API.
  */
 const GITHUB_USERNAME = 'hypixelisidiotic';
 const REPOSITORY = 'echo-rift';
 const BRANCH = 'main';
 const GAME_FILE = 'echo_rift_requiem.html';
+const MOD_API_FILE = 'echo_rift_mod_api.js';
 
 (async function loadRequiem(){
  const status=document.getElementById('status');
@@ -38,12 +40,24 @@ const GAME_FILE = 'echo_rift_requiem.html';
   if(GITHUB_USERNAME.startsWith('YOUR_')||REPOSITORY.startsWith('YOUR_'))
    throw new Error('Configure GITHUB_USERNAME and REPOSITORY near the bottom of this index.html file first.');
   const parts=[GITHUB_USERNAME,REPOSITORY,BRANCH,...GAME_FILE.split('/')].map(encodeURIComponent);
-  const url='https://raw.githubusercontent.com/'+parts.slice(0,3).join('/')+'/'+parts.slice(3).join('/')+'?v='+Date.now();
-  const response=await fetch(url,{cache:'no-store'});
+  const base='https://raw.githubusercontent.com/'+parts.slice(0,3).join('/')+'/';
+  const url=base+parts.slice(3).join('/')+'?v='+Date.now();
+  const apiUrl=base+MOD_API_FILE.split('/').map(encodeURIComponent).join('/')+'?v='+Date.now();
+  const [response,apiResponse]=await Promise.all([fetch(url,{cache:'no-store'}),fetch(apiUrl,{cache:'no-store'})]);
   if(!response.ok)throw new Error('GitHub returned HTTP '+response.status+'. Verify the repository is public and the file, branch and username are correct.');
-  const html=await response.text();
+  if(!apiResponse.ok)throw new Error('Missing mod API file on GitHub (HTTP '+apiResponse.status+'). Upload echo_rift_mod_api.js alongside the game HTML.');
+  let html=await response.text();
+  const apiSource=await apiResponse.text();
   if(!/<html[\s>]/i.test(html)||!/<script[\s>]/i.test(html))
    throw new Error('GitHub did not return the expected standalone game HTML file.');
+  const marker='<script src="echo_rift_mod_api.js"></'+'script>';
+  if(!html.includes(marker))throw new Error('The game HTML does not reference echo_rift_mod_api.js. Push the new game HTML to GitHub.');
+  // raw.githubusercontent.com serves JavaScript as text/plain; browsers cannot
+  // load it directly as a script. A same-origin blob URL preserves the external
+  // JavaScript file while letting document.write parse and execute it correctly.
+  const modBlob=URL.createObjectURL(new Blob([apiSource],{type:'text/javascript'}));
+  html=html.replace(marker,
+   '<script src="'+modBlob+'"></'+'script>');
   status.textContent='Starting REQUIEM…';
   // Replacing the document rather than opening an iframe preserves the same
   // site origin, so existing localStorage saves and the full-screen canvas work.
