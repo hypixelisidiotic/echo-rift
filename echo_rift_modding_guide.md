@@ -1,216 +1,202 @@
-# ECHO//RIFT: REQUIEM — Modding API
+# ECHO//RIFT: REQUIEM — Community Mod API 2.0
 
-**Mod API version:** 1.0 (experimental)  
-**Format:** a standalone `.js` file  
-**Load:** main menu → **MODS** → **INSTALL .JS** → **ENABLE**  
-**No external packages or build tools required.**
+**Format:** plain `.js` file · **Entry:** main menu → MODS → INSTALL → ENABLE  
+**Required host files:** `echo_rift_requiem.html` + `echo_rift_mod_api.js`  
+**Full playable reference:** `example_requiem_mod.js` (two new acts with custom AI and a mod-owned menu)
 
-## Before you start
+## What changed in 2.0
 
-Mods are optional and never run automatically when the page loads. Installed source is stored locally in your browser; enable it again after refreshing. Save files, Wordle progress and the unmodified campaign all remain usable without mods. Remove or disable mods from the manager if a run behaves unexpectedly.
+Mods can now create their own **main-menu buttons**, open **fully custom HTML/CSS/JavaScript screens**, add **independent multi-act campaigns**, create **entirely script-driven enemies**, and implement **new mechanics** with sandbox-driven simulation ticks, steering, projectiles, hazards, teleportation and custom drawing. The original 4-act game is not replaced or rewritten; custom campaigns are selectable alternate runs.
 
-**Security model:** Mod code executes in a hidden, sandboxed iframe with a unique opaque origin. It cannot directly read the host game's DOM, cookies, localStorage, or internal game variables. It sees only the information provided in API events and state snapshots, and can issue only supported commands. The sandbox is not a guarantee against malicious scripts: malicious mods can consume CPU, and external messaging or network behaviour may differ between browsers. Only install files from people you trust. A mod that misbehaves can be disabled, but save changes it made to gameplay results are not automatically undone. Keep a copy of your game and source.
+This is a foundation for genuinely custom experiences, not unlimited access to the host engine. Entirely new physics/collision models, native audio streams, multiplayer servers, arbitrary custom shaders and unbounded access to the DOM/engine are *not* provided. No stable third-party API can promise literally any feature without exposing the whole host process. APIs here are intentionally separated and may be expanded in future releases.
 
-All APIs described below are available through the **`RequiemMod`** global *inside your mod file*. They are **not** attached to the game page's `window` and you cannot access the game engine's private variables directly.
-
-## 1. Your first mod
-
-Save the following as `first_mod.js`:
+## Minimal mod
 
 ```js
-RequiemMod.register({
-  id: 'ham.first-mod',
-  name: 'First Mod',
-  version: '1.0.0',
-  description: 'A small starter mod.'
-});
+RequiemMod.register({id:'ham.my-mod', name:'My Mod',version:'2.0.0'});
+RequiemMod.on('run:start',()=>RequiemMod.toast('Mod loaded!',2));
+```
 
-RequiemMod.on('run:start', () => {
-  RequiemMod.toast('FIRST MOD IS ACTIVE!', 3);
-});
+Installation is per visitor, via `.js` import. Installed mod code persists in localStorage on that browser; mods begin **disabled** after each refresh. The user has to opt in before code runs. Previous v1 mods using the existing `RequiemMod` calls still work.
 
-RequiemMod.on('enemy:kill', (enemy) => {
-  // One extra point per enemy destroyed.
-  RequiemMod.addScore(1);
+## 1. Custom main-menu buttons
+
+```js
+RequiemMod.menu.addButton({id:'start',label:'★ MY CAMPAIGN',description:'NEW ACTS · ORIGINAL ENEMIES'});
+RequiemMod.on('menu:click',({id})=>{
+  if(id==='start')RequiemMod.ui.open({title:'MY CAMPAIGN'});
+});
+// Optionally:
+RequiemMod.menu.removeButton('start');
+```
+
+You may register multiple buttons (global cap 24) and remove them. Each button is owned by its mod and automatically disappears when that mod is disabled. `menu:click` events carry `{id}`. Buttons only act on the main menu.
+
+## 2. Completely custom mod screens
+
+**A mod's own DOM is available inside its sandbox iframe.** You can use `document`, `document.createElement`, normal CSS, DOM listeners and JavaScript to build arbitrary menus and interactive interfaces **within that isolated frame**. You are not editing the host game's DOM.
+
+```js
+const css=document.createElement('style');
+css.textContent='body{background:#091422;color:#aaf5ff;font-family:system-ui}button{padding:14px}';
+document.head.appendChild(css);
+const play=document.createElement('button');
+play.textContent='START MY ACT';
+play.addEventListener('click',()=>RequiemMod.playCampaign('my-act'));
+document.body.appendChild(play);
+
+RequiemMod.ui.open({title:'MY SCREEN'}); // only opens from main menu when enabled
+RequiemMod.ui.close();
+RequiemMod.on('ui:open',()=>console.log('Screen displayed'));
+RequiemMod.on('ui:close',()=>console.log('Screen hidden'));
+```
+
+When a mod screen is open, pressing **Escape** or **× CLOSE** closes it; clicking outside also closes it. The mod sandbox remains alive, so its state persists. The screen is *not* an unrestricted iframe: external network, host DOM, storage, popups and top-level navigation are blocked/restricted by sandbox/CSP. You can create as much native DOM/CSS as the iframe allows.
+
+**Important:** Do not try to use `window.parent.document`. The host is intentionally inaccessible. The visual viewport for a mod screen is the canvas-sized box inside the popup, and a mod owns only its iframe's content.
+
+## 3. Register your own scripted actor type
+
+```js
+RequiemMod.defineActor({
+  id:'hunter',name:'Amber Hunter',
+  hp:90, speed:170, radius:19, color:'#ffce8a', sides:7, score:220, boss:false
 });
 ```
 
-Open REQUIEM's main menu. Click **MODS** in the bottom-right corner, import `first_mod.js`, click **ENABLE**, and start a run. The mod's name and status appear in the panel.
+Set `boss:true` on a scripted actor to display a full boss health bar during its encounter (the sample Eclipse Crown uses this). Boss actors still participate in the ordinary collision/death system, so the mod defines their phases and attacks.
 
-## 2. Lifecycle and events
+Actors are **true game enemies** for collision, targeting, projectile damage, HP, death, scoring and victory conditions, but they do **not** inherit the built-in enemy movement or attack logic. The mod decides what they do. Actors render as glowing polygons (3–12 sides). Supported limits: HP 5–2,000, speed 0–700, radius 8–75, score 0–5,000, 36 distinct actor definitions globally.
 
-| Event | When it fires | Event payload |
-| --- | --- | --- |
-| `mod:enabled` | This mod has started | `{}` |
-| `run:start` | A new normal run begins | `{cycle, difficulty}` |
-| `room:start` | An encounter starts or resumes | `{cycle, act, bossRoom}` |
-| `room:clear` | Advance from a completed encounter | `{cycle, act}` |
-| `enemy:spawn` | A hostile appears | `{id, type, baseType, x, y, hp}` |
-| `enemy:kill` | A hostile is destroyed | `{id, type, baseType, x, y, value}` |
-| `player:damage` | The player takes a successful hit | `{damage, health, maxHealth}` |
-| `player:shoot` | Player fires a volley | `{x, y, angle}` |
-| `upgrade:chosen` | An upgrade is installed | `{id, name}` |
-| `boss:start` | A Warden fight begins | `{act, hp, maxHp}` |
-| `boss:phase` | A Warden changes phase | `{act, phase, healthFraction}` |
-| `boss:defeated` | A Warden is defeated | `{act}` |
-| `run:end` | The run ends | `{won, score, cycle}` |
-| `tick` | At most five times per second during combat | `{dt, elapsed, cycle}` |
-
-Note: after selecting an upgrade, some encounters resume without a new `room:start` event. For room progression use `room:start`; for new run state use `run:start`.
-
-Subscribe with:
+Spawn one using:
 
 ```js
-function onKill(enemy) { RequiemMod.toast('Destroyed ' + enemy.type, 1); }
-RequiemMod.on('enemy:kill', onKill);
-RequiemMod.once('boss:start', (boss) => RequiemMod.toast('WARDEN!', 2));
-RequiemMod.off('enemy:kill', onKill);
+RequiemMod.spawnActor('hunter');
+RequiemMod.spawnActor('hunter',{x:500,y:120});
 ```
 
-Only JSON-compatible data is delivered; do not expect game objects, functions or mutable references. Event handlers should finish quickly to keep gameplay responsive.
+In your campaign's `spawns` arrays, use just `'hunter'` as the type (same for ordinary built-in types such as `'charger'`). Your actor IDs are automatically namespaced per installed mod to avoid collisions. Actors cannot be spawned in menus or while paused.
 
-## 3. Reading the game
+## 4. Script novel movement and attacks
 
-`RequiemMod.getState()` returns a Promise with a read-only snapshot:
+`simulation:tick` fires approximately **10 times per second** during active gameplay. It carries:
 
 ```js
-RequiemMod.getState().then((s) => {
-  // s.state: 'menu', 'playing', 'paused', etc.
-  // s.cycle, s.act, s.difficulty, s.score, s.kills
-  // s.width, s.height (game-world units)
-  // s.player: {x, y, hp, maxHp, damage, speed, fireRate, res}
-  // s.boss: null or {act, x, y, hp, maxHp, phase}
-  // s.enemies: array of {id, type, baseType, x, y, hp, maxHp}
-  console.log(s);
-});
+{
+ dt:0.1, time:12.7, roomTime:3.6,
+ player:{x,y,hp,maxHp},
+ actors:[{id,type,x,y,hp,maxHp,vx,vy}, ...],
+ campaign:null | {id,room}
+}
 ```
 
-Snapshots describe the game when the request is handled, not necessarily the exact frame where you requested them. If you need periodic information, use `tick` with `getState()` sparingly.
-
-## 4. Supported gameplay actions
-
-Commands are **asynchronous fire-and-forget**, applied in the game loop when received. They are rate-limited and validated; excessive or invalid commands may be ignored.
+Only script-controlled actors are in `actors`, not built-in enemies. `id` is the unique active actor instance ID, while `type` ends with your actor type's local name. For accurate steering, use normalized components with `RequiemMod.steerActor(id,vx,vy)`; magnitude is clamped. Only the mod that created an actor type can steer that actor. The engine interpolates movement at its normal tick rate and applies collision/damage normally.
 
 ```js
-RequiemMod.toast('NEW SIGNAL', 2.5);         // short HUD notification
-RequiemMod.addScore(100);                    // add nonnegative score
-RequiemMod.heal(8);                          // heal up to max health
-RequiemMod.spawnEnemy('charger');            // spawns at a safe arena edge
-RequiemMod.spawnEnemy('wisp', {x:250, y:100}); // optional approximate position
-RequiemMod.ring({x:250,y:200,color:'#ff77aa',radius:12,end:90,life:.45});
-RequiemMod.fire({team:'hostile',x:200,y:100,angle:1.2,speed:230,count:3,spread:.2});
-RequiemMod.fire({team:'player',x:200,y:100,angle:1.2,speed:640,damage:5});
-RequiemMod.damageNearby({x:250,y:200,radius:110,damage:15});
-RequiemMod.slowNearby({x:250,y:200,radius:140,seconds:2});
-RequiemMod.boost({damage:1.1,speed:1.08,fireRate:0.95});
-```
-
-`boost` multipliers apply to current player stats: `damage > 1` increases damage, `speed > 1` increases movement speed, and `fireRate < 1` makes firing faster. These multipliers are deliberately clamped to prevent invalid physics. Player bonuses reset on a new run; reapply them on `run:start` if needed.
-
-The `fire` command creates ordinary game projectiles using the supplied position (with bounded damage, count, speed, and radius); no bypass of invulnerability or collision rules is provided. `spawnEnemy` is limited to active gameplay and a total active hostile cap. Enemy types available by default: `wisp`, `shooter`, `charger`, `bulwark`, `splitter`, `sniper`, `weaver`, `spinner`, `corsair`, `obelisk`, `interceptor`, `needle`, `prism`, `vesper`.
-
-## 5. Defining a custom enemy variant
-
-You can register a unique enemy with different stats and sprite colour while reusing an existing built-in AI and underlying procedural hull. It can spawn explicitly or join normal room spawn pools. **Fully bespoke AI scripts, new shaders, sprite image imports and custom boss replacements are not supported in API v1.**
-
-```js
-RequiemMod.register({id:'ham.neon-hunter',name:'Neon Hunter',version:'1.0'});
-
-RequiemMod.defineEnemy({
-  id: 'hunter',                // ID local to THIS mod
-  base: 'charger',            // built-in movement / attack AI
-  name: 'Neon Hunter',
-  color: '#8bffea',           // procedural hull tint
-  hpScale: 1.35,             // 0.25..5
-  speedScale: 1.20,          // 0.25..3
-  radiusScale: 1.05,         // 0.6..1.8
-  spawnChance: 0.07         // 0..0.25 chance in ordinary rooms
-});
-
-RequiemMod.on('run:start', () => {
-  RequiemMod.toast('Neon Hunters have arrived', 3);
-});
-
-RequiemMod.on('enemy:kill', (e) => {
-  if (e.type.endsWith(':hunter')) RequiemMod.addScore(15);
-});
-```
-
-Call `RequiemMod.spawnEnemy('hunter')` to spawn your custom type. The public event `type` is namespaced as `<installed-mod-id>:hunter`, while `baseType` remains `charger`. Spawn pools still respect normal enemy population limits. In the Hostile Index, kills count towards the underlying built-in enemy rather than creating new codex records.
-
-The game does not synchronize game scores, installed mods or metadata to a server. A modded score is not proof of unmodified play.
-
-## 6. Adding custom upgrade cards
-
-Mods can add upgrade cards directly into the ordinary Acts I–III draft pool. You supply metadata and bounded effects; the core game renders the card and applies the effects. Custom cards are deliberately omitted from the inherited-legacy upgrade pool for now, and do not appear during Act IV severance.
-
-```js
-RequiemMod.defineUpgrade({
-  id: 'neon-accelerator',            // unique within this mod
-  name: 'NEON ACCELERATOR',
-  symbol: '✧',
-  description: '+12% movement speed and +8% projectile damage.',
-  tag: 'KINETIC',                   // BALLISTICS | KINETIC | CIRCUIT | TEMPORAL
-  rarity: 'RARE',                   // COMMON | RARE | PROTOTYPE
-  max: 2,                          // maximum ranks (1 to 3)
-  effects: {
-    damage: 1.08,                  // multiplier 0.7..1.5
-    speed: 1.12,                   // multiplier 0.7..1.5
-    fireRate: 1,                   // multiplier 0.7..1.5 (lower is faster)
-    heal: 0                        // hull restored on pick (0 to 40)
+const nextShot=new Map();
+RequiemMod.on('simulation:tick',tick=>{
+  if(!tick.player)return;
+  for(const actor of tick.actors){
+    if(!actor.type.endsWith(':hunter'))continue;
+    const dx=tick.player.x-actor.x,dy=tick.player.y-actor.y;
+    const len=Math.hypot(dx,dy)||1;
+    // Invent any scriptable AI rule, based on the player, health, time, etc.
+    RequiemMod.steerActor(actor.id,dx/len,dy/len);
+    if(tick.time>=(nextShot.get(actor.id)||0)){
+      RequiemMod.fire({team:'hostile',x:actor.x,y:actor.y,angle:Math.atan2(dy,dx),speed:245,count:3});
+      nextShot.set(actor.id,tick.time+2);
+    }
   }
 });
-
-RequiemMod.on('upgrade:chosen', u => {
-  // Community upgrade IDs are namespaced with an installation-specific ID.
-  if (u.name === 'NEON ACCELERATOR') RequiemMod.toast('ACCELERATOR ENGAGED', 2);
-});
+RequiemMod.on('actor:death',({id,type,x,y})=>nextShot.delete(id));
 ```
 
-Each card is only a single upgrade selection: effects are applied once per rank when chosen and automatically reset when a new pilot begins. Card names, symbols and descriptions are sanitized before being rendered. Because this is a sandboxed, declarative interface, cards cannot provide arbitrary synchronous `apply()` functions; for extra behaviour, listen to the existing `upgrade:chosen` event.
+Actor movement is applied asynchronously by `postMessage`; rapid reactions may have up to one simulation tick of latency. Collision and movement continue in the main game loop. Mod commands are capped at **250/s per mod**; expensive AI should work with tens of actors, not thousands. The shared enemy population limit is 125, and the `simulation:tick` snapshot reports up to 50 scripted actors.
 
-## 7. Example: a new difficulty mutator
+## 5. Full new campaigns and acts
+
+Declare as many as 12 acts with up to 10 rooms per act (48 rooms maximum per campaign). Each room can have up to 100 scheduled spawn groups, each with 1–20 units. Acts are named sections of a custom standalone run, not rewrites of the canonical four. Normal-room upgrade drafts and canonical Warden bosses are not automatically inserted; make your own room pacing and guardian with scripted actors instead.
 
 ```js
-RequiemMod.register({
-  id:'example.double-trouble', name:'Double Trouble', version:'1.0.0',
-  description:'Every sixth normal kill spawns a charger.'
+RequiemMod.defineCampaign({
+ id:'new-world', name:'THE FIFTH SIGNAL',
+ acts:[
+  {name:'ACT V // ESCAPE',rooms:[
+   {name:'COLD ENTRY',duration:15,spawns:[
+    {at:1,type:'hunter',count:2},
+    {at:5,type:'charger',count:3},
+    {at:9,type:'hunter',count:1,position:{x:400,y:200}}
+   ]},
+   {name:'GUARDIAN',duration:18,spawns:[{at:1,type:'my-boss',count:1}]}
+  ]}
+ ]
 });
-let normalKills = 0;
-RequiemMod.on('run:start', () => { normalKills = 0; });
-RequiemMod.on('enemy:kill', (e) => {
-  if (e.baseType === 'charger') return;
-  if (++normalKills % 6 === 0) {
-    RequiemMod.spawnEnemy('charger', {x:e.x, y:e.y});
-    RequiemMod.ring({x:e.x,y:e.y,color:'#ff7788',radius:10,end:85,life:.5});
-  }
-});
+RequiemMod.playCampaign('new-world'); // must be called from main menu
 ```
 
-## 8. Common pitfalls
+The `playCampaign` command resets the run and begins room 1. Rooms end when their duration elapses, all scheduled groups have appeared, and all living enemies are defeated. Combat events/physics are the same as the main game, including the player taking damage and losing the run. When the final room clears, a custom expedition victory screen appears. The run is marked as a community expedition in the HUD. There is **no canonical rebirth or Act IV severance** in these modes.
 
-- **Nothing happens:** Importing a file does not mean it has been enabled; check the mod manager for its status. Mods enabled while on the main menu will receive future run events.
-- **The mod shows an error:** Open browser developer tools. The mod manager shows script/load errors when the sandbox reports them.
-- **Your mod references `window.player` or `document.getElementById('game')`:** The sandbox intentionally isolates that; use `getState()` and supported actions instead.
-- **Your API commands do nothing on the main menu:** Gameplay commands work only during an active run; metadata registration is allowed before entering gameplay.
-- **You refreshed and the mod is disabled:** Intentional. Saved mods require explicit enablement per page load.
-- **Update the API version:** Use `RequiemMod.version` to check the supported major release. v1 does not promise undocumented internals will be stable.
-- **Running with a GitHub loader:** Publish `echo_rift_requiem.html` AND `echo_rift_mod_api.js` at the repository root, and update the website's `index.html` GitHub loader to the compatible version once. The loader fetches both files. Local/offline builds require the files side by side. If the API file is absent, the main game should still run, but no mods button appears.
+Campaign events: `campaign:start` `{id,name,rooms}`, `campaign:room` `{id,index,act,name,duration}`, `campaign:clear` `{id,index,name}`, and `campaign:complete` `{id,name}`. Existing events such as `enemy:spawn`, `enemy:kill`, `player:damage`, `player:shoot`, `input:press`, `input:release`, `player:dash`, `player:pulse`, `run:start` and `run:end` also apply. `run:start` happens just before the community campaign is fully initialized, so use `campaign:start` for campaign-specific setup.
 
-## 9. Source-file convention
+## 6. New mechanics and custom visuals
+
+In addition to v1 actions, v2 provides:
+
+```js
+RequiemMod.teleport(400,260);                    // reposition pilot (short safety window)
+RequiemMod.hazard({x:450,y:250,radius:65,warning:1.2}); // telegraphed arena hazard
+RequiemMod.draw({kind:'circle',x:450,y:250,radius:80,color:'#a4fffb',life:.4});
+RequiemMod.draw({kind:'line',x:200,y:150,x2:800,y2:450,width:2,color:'#ffaa99',life:.5});
+RequiemMod.draw({kind:'text',x:420,y:140,text:'DODGE!',size:22,color:'#ecafff',life:.7});
+RequiemMod.draw({kind:'rect',x:120,y:160,w:100,h:42,color:'#aaffef',fill:false});
+```
+
+All effects use validated sizes, colours and durations. Call `draw` when needed to create temporary effects, not continuously for static UI. You can use sandbox DOM/CSS for permanent menu/HUD-like interfaces within a mod screen. To invent mechanics, combine events, JS state, time-based rules, custom steering, bullets, hazards, heals and player stat modifications. More engine primitives can be added in future versions without exposing host internals.
+
+### Keyboard-triggered abilities
+
+Mods can invent player abilities and control schemes through `input:press` `{key}` and `input:release` `{key}`. These events are delivered only during gameplay. Normal game controls still work and are not automatically overridden by mods; choose an unused key such as **Q**. Combine the input with `getState()`, `damageNearby`, `slowNearby`, `teleport`, `fire`, etc. **The example expedition includes a Q-key Corona Pulse** with a six-second cooldown implemented entirely in its `.js` file. `player:dash` and `player:pulse` events also exist, so mods can react to existing abilities.
+
+## 7. Existing v1 API — still supported
+
+```js
+RequiemMod.register({id,name,version,description});
+RequiemMod.on('event',callback); RequiemMod.once('event',callback); RequiemMod.off('event',callback);
+const snapshot=await RequiemMod.getState();
+RequiemMod.toast('message',2.5);
+RequiemMod.heal(10); RequiemMod.addScore(100);
+RequiemMod.spawnEnemy('charger',{x:300,y:180});
+RequiemMod.defineEnemy({id:'glow',base:'wisp',name:'Glowing Wisp',color:'#94f6ff',hpScale:2,speedScale:1.1,radiusScale:1,spawnChance:.1});
+RequiemMod.defineUpgrade({id:'boost',name:'POWER',symbol:'✧',description:'Stronger shots',tag:'BALLISTICS',rarity:'RARE',max:2,effects:{damage:1.15,speed:1,fireRate:1,heal:0}});
+RequiemMod.ring({x:250,y:200,color:'#aaf4ff',radius:12,end:90,life:.45});
+RequiemMod.fire({team:'player',x:250,y:200,angle:1,speed:640,damage:8});
+RequiemMod.fire({team:'hostile',x:250,y:200,angle:1,speed:260,count:4,spread:.2});
+RequiemMod.damageNearby({x:250,y:200,radius:110,damage:20});
+RequiemMod.slowNearby({x:250,y:200,radius:160,seconds:2});
+RequiemMod.boost({damage:1.1,speed:1.08,fireRate:.95});
+```
+
+Supported v1 events: `mod:enabled`, `run:start`, `run:end`, `room:start`, `room:clear`, `enemy:spawn`, `enemy:kill`, `player:damage`, `player:shoot`, `boss:start`, `boss:phase`, `boss:defeated`, `upgrade:chosen`, and `tick`. V2 adds the events documented above, including `actor:damage` `{id,type,hp,maxHp,damage}`.
+
+## 8. Sandboxing, trust and compatibility
+
+Your `.js` executes in a `<iframe sandbox="allow-scripts">` with **opaque origin** and a restrictive content-security policy. Sandbox code does not get host cookies, host DOM, top-level navigation, or access to the game's JavaScript objects. The exposed API is a narrow `postMessage` bridge; engine-side validation and rate limits apply. Unlike v1, **mod screens can use their OWN frame DOM and inline CSS**. There are still limitations: malware can consume memory/CPU, exploit browsers, and game-balance changes can be abused. Do not install untrusted mods. There is no permission dialog for individual API actions in v2.
+
+No mods are active on initial page load. The user's installed mods are stored on their own browser, and each mod must be manually enabled again after a refresh. Disabling a mod clears its button definitions, actor types, and custom campaigns; currently running mod scripts stop. Mods should not expect their content to survive disabling. Scores from modded games should not be mixed with competitive, verified vanilla leaderboards.
+
+**Developing:** Start by importing `example_requiem_mod.js`. Edit the button label or actor AI in the file; reimport and enable the new copy. Use browser developer tools for mod errors. Test after adding larger waves and at multiple screen sizes.
+
+## 9. Website deployment
+
+Commit these *separate files* to `hypixelisidiotic/echo-rift` on its `main` branch:
 
 ```text
-echo-rift/
-├── echo_rift_requiem.html       # game and engine bridge
-├── echo_rift_mod_api.js         # independent mod loader + sandbox + UI
-├── echo_rift_modding_guide.md   # this document
-└── example_requiem_mod.js       # optional reference mod
+echo_rift_requiem.html
+echo_rift_mod_api.js
+echo_rift_modding_guide.md
+example_requiem_mod.js
 ```
 
-Install the GitHub-compatible loader on your Apache server at `/var/www/html/game/index.html` **only once**. It downloads the game and its API module from your public GitHub `main` branch with cache-busting. GitHub itself remains the source of truth for later patches.
+The **GitHub loader on your Linode VPS does not need to be replaced** if you're already using the v1 mod-enabled two-file loader. That loader fetches both the core HTML and the separate API JavaScript on each visit. If your site still uses the old single-file loader, install the two-file loader from the package first. Reopen the game after pushing both files; refresh with cache bypass if necessary.
 
-## 10. Boundaries and compatibility
-
-The API exists so modders can extend REQUIEM without changing its core source. It isn't a way to secretly install background scripts on other visitors: every player must import and explicitly enable mods in their own browser. A file selected on one machine doesn't automatically appear on another.
-
-This is **v1.0**. The stable contract is the events, snapshots and commands described above. Other names in the game's source are private implementation details and may change. Contact the game maintainer when a new hook is needed.
+**API 2.0 is experimental:** documented v1 mod calls are retained, and 2.0 adds opt-in modes/hooks. Future revisions may add custom collision geometry, animated sprites, custom upgrades within community expeditions, richer drawing APIs, HUD widgets, audio, and mod-to-mod interoperability. These are not implemented today.

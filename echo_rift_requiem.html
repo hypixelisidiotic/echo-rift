@@ -288,6 +288,7 @@ const modEmit=(event,data={})=>modBus?.emit(event,data);
 const clamp=(n,a,b)=>Math.min(b,Math.max(a,n)),lerp=(a,b,t)=>a+(b-a)*t,rand=(a,b)=>a+Math.random()*(b-a),rr=(a,b)=>Math.floor(rand(a,b)),hyp=(x,y)=>Math.hypot(x,y),dist=(a,b)=>hyp(a.x-b.x,a.y-b.y);
 let vw=1280,vh=720,scale=1,cw=1280,ch=720,dpr=1,wallTime=0,runTime=0,acc=0,lastTime=0,frame=0,state='menu',touchMode=false;
 let player,enemies=[],bullets=[],hostileBullets=[],particles=[],rings=[],texts=[],pickups=[],echoes=[],recording=[],boss=null,stars=[],floatingOrbs=[],hazards=[];
+let communityCampaign=null,modVisuals=[];
 let cycle=1,cycleTime=0,stageTime=0,spawnTimer=1.2,score=0,kills=0,combo=0,comboTimer=0,hitStop=0,shake=0,whiteFlash=0,pulseTime=0,alertTimer=0,toastTime=0,finalFlag=false,musicAt=0;
 const durations=[0,35,39,43,Infinity,42,46,50,Infinity,49,53,58,Infinity,26,32,37,Infinity],stageNames=['','THE WAKE','SIGNAL JAM','FIRST CONTACT','THE CUSTODIAN','AFTERIMAGE','FALSE STARS','FAULT GARDEN','MIRROR ENGINE','THE LONG DARK','TERMINAL VEIL','BLACKOUT','THE SILENCE','DISCONNECTION','PALE CIRCUIT','THE LAST GATE','THE NULL CHOIR'];
 const keys=new Set(),mouse={x:0,y:0,down:false,moved:false},touch={left:{id:null,x:0,y:0,dx:0,dy:0},right:{id:null,x:0,y:0,dx:0,dy:0}},input={dx:0,dy:0,fire:false,ax:1,ay:0};
@@ -685,6 +686,7 @@ function songTick(dt){}
 
 function createPilot(){return {x:vw/2,y:vh/2,r:15,hp:100,maxHp:100,angle:0,fireCd:0,fireRate:.16,damage:4.15,bulletSpeed:780,shots:1,spread:.18,shotDamageScale:1,pierce:0,dashCd:0,dashTimer:0,dashVX:0,dashVY:0,invuln:1.4,speed:285,res:0,resDuration:0,resDurationMax:5.5,echoPower:.66,orbital:0,chain:0,crit:0,regen:0,repair:0,repairHits:0,damageTaken:0,trail:[],bounce:0,frost:0,blast:0,homing:0,execute:0,bossDamage:0,frenzy:0,frenzyTime:0,afterburn:0,dashNova:0,grazePower:1,grazeBolt:0,nearBonus:0,resPower:1,resShot:0,resDurationBoost:0,echoReach:37,killNova:0,glass:0,leech:0,arcPulse:0,pulseSlow:0,ward:0,magnet:155,shotBurst:0,overdrive:0,overdriveTime:0,comboGain:0,phaseSlipTime:0,burstSpeed:0,grazeDash:0,slipstream:0};}
 function reset(){
+ communityCampaign=null;modVisuals=[];
  sfx('select',.5);
  player=createPilot();
  enemies=[];bullets=[];hostileBullets=[];particles=[];rings=[];texts=[];pickups=[];echoes=[];recording=[];hazards=[];boss=null;deathCine=null;severed=false;finalPattern=null;cycle=1;cycleTime=0;runTime=0;spawnTimer=1.4;hazardClock=9;score=0;kills=0;combo=0;comboTimer=0;frame=0;finalFlag=false;hitStop=0;shake=0;whiteFlash=0;musicAt=0;autoFire=false;$('touchAuto').style.borderColor='#8ac6e8a0';$('touchAuto').style.color='#e0f8ff';rerolls=2;picks={};draftStep=0;draftPicked=null;roomPurging=false;archiveCandidates=[];totalMods=0;roomStartKills=0;roomSpawnTarget=plannedSpawns(cycle);roomSpawned=0;roomKills=0;midDraftGranted=false;draftPhase='end';roomYellowSpawned=0;roomInterceptorSpawned=0;shotCounter=0;grazeChain=0;grazeTimer=0;resetAutoAim();clearDiscovery();bossCount=0;clearedRooms=0;upgradeMode='gear';lastOffers=[];
@@ -692,19 +694,53 @@ function reset(){
  setAlert('ACT I // THE WAKE','ENCOUNTER 01','THE ARCHIVE IS EMPTY. BUILD SOMETHING WORTH REMEMBERING.',2.7);
  setToast(touchMode?'LEFT STICK MOVE · RIGHT STICK FIRE':'CLEAR EVERY ENEMY · MID-ROOM DRAFT EVERY SECOND ROOM · F AUTO-FIRE',4);updateHud();
 }
+// Community campaigns are independent, mod-defined play modes. They never
+// modify the four canonical acts and use the existing physics/combat engine.
+function startCommunityCampaign(spec){
+ if(state!=='menu'||!spec||!Array.isArray(spec.rooms)||!spec.rooms.length)return false;
+ reset();communityCampaign={id:spec.id,name:spec.name,rooms:spec.rooms,index:0,room:null,spawnIndex:0,actName:''};
+ beginCommunityRoom();modEmit('campaign:start',{id:spec.id,name:spec.name,rooms:spec.rooms.length});return true;
+}
+function beginCommunityRoom(){
+ const c=communityCampaign;if(!c)return;
+ const room=c.rooms[c.index];if(!room){end(true);return}
+ c.room=room;c.actName=room.actName||c.name;c.spawnIndex=0;
+ cycle=1+c.index%3;cycleTime=0;spawnTimer=99999;hazardClock=99999;
+ enemies=[];bullets=[];hostileBullets=[];pickups=[];hazards=[];boss=null;
+ roomPurging=false;roomSpawned=0;roomKills=0;roomSpawnTarget=room.spawns.reduce((n,w)=>n+w.count,0);
+ player.x=vw*.5;player.y=vh*.75;player.invuln=Math.max(player.invuln,1.4);
+ $('upgradeOverlay').classList.add('hidden');$('hud').classList.remove('hidden');state='playing';
+ setAlert(c.actName.toUpperCase(),room.name.toUpperCase(),'COMMUNITY EXPEDITION // '+(c.index+1)+' / '+c.rooms.length,2.7);
+ modEmit('campaign:room',{id:c.id,index:c.index,act:c.actName,name:room.name,duration:room.duration});updateHud();
+}
+function updateCommunityRoom(){
+ const c=communityCampaign;if(!c||!c.room)return;
+ const r=c.room;
+ while(c.spawnIndex<r.spawns.length&&cycleTime>=r.spawns[c.spawnIndex].at){
+  const wave=r.spawns[c.spawnIndex++];
+  for(let i=0;i<wave.count;i++)if(enemies.length<120)spawnEnemy(wave.type,true,wave.position);
+ }
+ if(cycleTime>=r.duration&&c.spawnIndex===r.spawns.length&&enemies.every(e=>e.dead)){
+  modEmit('campaign:clear',{id:c.id,index:c.index,name:r.name});
+  clearedRooms++;c.index++;
+  if(c.index>=c.rooms.length){modEmit('campaign:complete',{id:c.id,name:c.name});end(true)}
+  else beginCommunityRoom();
+ }
+}
 function setAlert(over,main,sub,t=2){$('alertOver').textContent=over;$('alertMain').textContent=main;$('alertSub').textContent=sub;alertTimer=t;$('alert').style.opacity='1'}
 function setToast(s,t=2.5){$('toast').textContent=s;$('toast').style.opacity='1';toastTime=t}
 const echoSlotNodes=[...document.querySelectorAll('.echoSlot')];
 function updateHud(){
  $('healthFill').style.width=clamp(player.hp/player.maxHp*100,0,100)+'%';$('healthText').textContent=Math.ceil(player.hp)+' / '+player.maxHp;
  const act=Math.ceil(cycle/4),isBoss=cycle%4===0;
- $('waveText').textContent='ACT '+['','I','II','III','IV'][act]+' / '+(isBoss?(act===4?'FINAL ENTITY':'WARDEN'):'ROOM '+(((cycle-1)%4)+1)+' / 3');
- $('stageName').textContent=stageNames[cycle];
- $('timeText').textContent=isBoss?'BOSS':roomPurging?'PURGE':String(Math.max(0,Math.ceil(durations[cycle]-cycleTime))).padStart(2,'0')+'s';
- $('timeText').classList.toggle('danger',!isBoss&&durations[cycle]-cycleTime<7&&!roomPurging);
+ const customRoom=communityCampaign?.room;
+ $('waveText').textContent=customRoom?'CUSTOM // '+communityCampaign.actName+' · '+(communityCampaign.index+1)+' / '+communityCampaign.rooms.length:'ACT '+['','I','II','III','IV'][act]+' / '+(isBoss?(act===4?'FINAL ENTITY':'WARDEN'):'ROOM '+(((cycle-1)%4)+1)+' / 3');
+ $('stageName').textContent=customRoom?customRoom.name:stageNames[cycle];
+ $('timeText').textContent=customRoom?String(Math.max(0,Math.ceil(customRoom.duration-cycleTime))).padStart(2,'0')+'s':isBoss?'BOSS':roomPurging?'PURGE':String(Math.max(0,Math.ceil(durations[cycle]-cycleTime))).padStart(2,'0')+'s';
+ $('timeText').classList.toggle('danger',customRoom?customRoom.duration-cycleTime<7:!isBoss&&durations[cycle]-cycleTime<7&&!roomPurging);
  const remain=enemies.reduce((n,e)=>n+(e.dead?0:1),0);
  const progress=roomKills+' / '+roomSpawnTarget+' TARGETS';
- $('clearProgress').textContent=isBoss?(act===4?'FINAL ENTITY // ZERO SUPPORT':'DEFEAT THE WARDEN'):roomPurging?'PURGE · '+remain+' LEFT · '+progress: progress+' · '+remain+(cw<760?' LIVE':' HOSTILES ACTIVE');
+ $('clearProgress').textContent=customRoom?'CUSTOM MISSION · '+remain+' REMAIN · '+progress:isBoss?(act===4?'FINAL ENTITY // ZERO SUPPORT':'DEFEAT THE WARDEN'):roomPurging?'PURGE · '+remain+' LEFT · '+progress: progress+' · '+remain+(cw<760?' LIVE':' HOSTILES ACTIVE');
  $('scoreText').textContent=String(Math.floor(score)).padStart(6,'0');
  $('comboText').textContent='×'+(1+Math.min(combo,40)*.075).toFixed(1)+(cw<760?' · '+Object.values(picks).reduce((a,b)=>a+b,0)+' MODS':' MULTIPLIER · '+Object.values(picks).reduce((a,b)=>a+b,0)+' ACTIVE · '+totalMods+' FOUND');
  const finalFight=cycle===16,livePulse=!finalFight&&player.resDuration>0,remainPulse=livePulse?player.resDuration/Math.max(.01,player.resDurationMax):0;
@@ -766,10 +802,10 @@ function playerHurt(n){
  */
 function killEnemy(e){
  if(e.dead)return;
- e.dead=true;recordHostile(e.type);modEmit('enemy:kill',{id:e.id,type:e.modType||e.type,baseType:e.type,x:e.x,y:e.y,value:e.value});
+ e.dead=true;if(!e.scripted)recordHostile(e.type);if(e.scripted)modEmit('actor:death',{id:e.id,type:e.modType,x:e.x,y:e.y});modEmit('enemy:kill',{id:e.id,type:e.modType||e.type,baseType:e.type,x:e.x,y:e.y,value:e.value});
  // Only the three severance chambers restore hull. The Null Choir grants no healing.
  // This works without a module because entering Act IV erases the entire loadout.
- if(state==='playing'&&cycle>=13&&cycle<=15){
+ if(!communityCampaign&&state==='playing'&&cycle>=13&&cycle<=15){
   const recovered=Math.min(2,Math.max(0,player.maxHp-player.hp));
   if(recovered>0){
    player.hp+=recovered;
@@ -797,11 +833,13 @@ const NORMAL_ENEMY_HP=(type,act,difficulty)=>{
  return stats[0]*(act===4?1.20+difficulty*.25:1+(act-1)*.68+difficulty*.30);
 };
 function makeEnemy(type,x,y){
- const spec=modBus?.enemyDefinition(type);const builtinType=spec?.base||type;
+ const spec=modBus?.enemyDefinition(type),actor=modBus?.actorDefinition(type);const builtinType=spec?.base||(actor?'wisp':type);
  const act=Math.ceil(cycle/4),base=ENEMY_BASE_STATS[builtinType],stats=[base[0],base[1]+act*base[2],base[3],base[4],base[5]];
  const scaleHp=act===4?1.20+Math.max(0,cycle-13)*.08+threat*.25:(1+(act-1)*.68+threat*.30);
  const e={id:Math.random(),type:builtinType,modType:spec?type:null,x,y,vx:0,vy:0,hp:stats[0]*scaleHp,maxHp:stats[0]*scaleHp,speed:stats[1]*(1+threat*.11),r:stats[2],value:stats[3],color:stats[4],phase:rand(0,TAU),fireCd:rand(.8,2),dashCd:rand(1.5,3.5),aimAngle:0,windup:0,chargeVx:0,chargeVy:0,flash:0,dead:false,age:0,slow:0,laser:null,volley:0,heading:0,baseHeading:0,motionVX:0,motionVY:0};
- if(spec){e.hp*=spec.hpScale;e.maxHp=e.hp;e.speed*=spec.speedScale;e.r*=spec.radiusScale;e.color=spec.color}return e;
+ if(spec){e.hp*=spec.hpScale;e.maxHp=e.hp;e.speed*=spec.speedScale;e.r*=spec.radiusScale;e.color=spec.color}
+ if(actor){e.modType=type;e.scripted=true;e.actorOwner=actor.owner;e.hp=e.maxHp=actor.hp;e.speed=actor.speed;e.r=actor.radius;e.color=actor.color;e.value=actor.score;e.scriptVX=0;e.scriptVY=0;e.spriteSides=actor.sides;e.actorBoss=actor.boss;e.actorName=actor.name}
+ return e;
 }
 function roomNumber(n=cycle){return n-Math.floor(n/4)}
 function plannedSpawns(n=cycle){if(n%4===0)return 0;const act=Math.ceil(n/4),slot=(n-1)%4;return act===4?20+slot*5+threat*4:32+7*(act-1)+3*slot+4*threat}
@@ -1127,13 +1165,13 @@ function doDash(){
  if(state!=='playing'||cycle===16||player.dashCd>0)return;
  let dx=input.dx,dy=input.dy;if(hyp(dx,dy)<.2){dx=Math.cos(player.angle);dy=Math.sin(player.angle)}const d=hyp(dx,dy)||1;
  player.dashVX=dx/d;player.dashVY=dy/d;player.dashTimer=.19*(1+player.slipstream*.18);player.dashCd=1.6*(player.dashMult||1);player.invuln=Math.max(player.invuln,.27);if(player.burstSpeed)player.phaseSlipTime=2;
- shake=7;addRing(player.x,player.y,'#8deaff',10,70,.3);addParticles(player.x,player.y,'#8deaff',10,.6);sfx('dash',.6);
+ modEmit('player:dash',{x:player.x,y:player.y});shake=7;addRing(player.x,player.y,'#8deaff',10,70,.3);addParticles(player.x,player.y,'#8deaff',10,.6);sfx('dash',.6);
  if(player.dashNova){let radius=105+player.dashNova*38;addRing(player.x,player.y,'#b7fcff',9,radius,.5,3);for(let foe of enemies){if(!foe.dead&&hyp(foe.x-player.x,foe.y-player.y)<radius)damageEnemy(foe,player.damage*(3+player.dashNova),true)}if(boss&&!boss.dead&&hyp(boss.x-player.x,boss.y-player.y)<radius+boss.r)boss.hp-=player.damage*5*player.dashNova;if(boss&&boss.hp<=0)killBoss();}
 }
 function doPulse(){
  // Time dilation cannot be activated against the Null Choir.
  if(state!=='playing'||cycle===16||player.res<100||player.resDuration>0)return;
- player.res=0;player.resDuration=5.5+player.resDurationBoost;player.resDurationMax=player.resDuration;pulseTime=.7;shake=16;whiteFlash=.17;
+ modEmit('player:pulse',{x:player.x,y:player.y});player.res=0;player.resDuration=5.5+player.resDurationBoost;player.resDurationMax=player.resDuration;pulseTime=.7;shake=16;whiteFlash=.17;
  addRing(player.x,player.y,'#c5a0ff',10,Math.max(vw,vh),1.2,5);addParticles(player.x,player.y,'#d3a6ff',75,1.4);sfx('pulse',.92);
  if(player.arcPulse){for(let e of enemies){if(!e.dead&&hyp(e.x-player.x,e.y-player.y)<375)damageEnemy(e,player.damage*player.arcPulse*8,true)}if(boss&&!boss.dead&&hyp(boss.x-player.x,boss.y-player.y)<425){boss.hp-=player.damage*player.arcPulse*11;if(boss&&boss.hp<=0)killBoss()}}
  setToast('RESONANCE ACTIVE // TIME ×'+(player.pulseSlow?'.22':'.35'),2);
@@ -1142,14 +1180,14 @@ function pause(){if(state==='playing'){sfx('back',.38);state='paused';$('pauseOv
 function end(win){
  if(state==='end')return;state='end';finalFlag=win;modEmit('run:end',{won:win,score,cycle});player.hp=Math.max(0,player.hp);
  $('hud').classList.add('hidden');$('endOverlay').classList.remove('hidden');
- $('endEyebrow').textContent=win?'THE ARCHIVE IS COMPLETE':'LIFE TERMINATED';
- $('endTitle').textContent=win?'THE LAST SIGNAL GOES QUIET.':'THE RIFT CLAIMS THIS PILOT.';
- $('endDesc').textContent=win?'Three Wardens archived. Every memory sacrificed. The fourth pilot faced the Null Choir alone — and prevailed.':'You reached encounter '+cycle+' / 16. Your next timeline can take a different shape — and the archive will demand better.';
- $('endScore').textContent=score.toLocaleString();$('endKills').textContent=kills.toLocaleString();$('endCycles').textContent=clearedRooms+' / 16';
+ $('endEyebrow').textContent=communityCampaign?(win?'EXPEDITION COMPLETE':'EXPEDITION LOST'):win?'THE ARCHIVE IS COMPLETE':'LIFE TERMINATED';
+ $('endTitle').textContent=communityCampaign?(win?'SIGNAL CONQUERED.':'EXPEDITION FAILED.'):win?'THE LAST SIGNAL GOES QUIET.':'THE RIFT CLAIMS THIS PILOT.';
+ $('endDesc').textContent=communityCampaign?(win?'You completed '+communityCampaign.name+'.':'You reached room '+(communityCampaign.index+1)+' of '+communityCampaign.rooms.length+' in '+communityCampaign.name+'.'):win?'Three Wardens archived. Every memory sacrificed. The fourth pilot faced the Null Choir alone — and prevailed.':'You reached encounter '+cycle+' / 16. Your next timeline can take a different shape — and the archive will demand better.';
+ $('endScore').textContent=score.toLocaleString();$('endKills').textContent=kills.toLocaleString();$('endCycles').textContent=clearedRooms+' / '+(communityCampaign?.rooms.length||16);
  let newBest=score>best();if(newBest)setBest(Math.floor(score));$('endBest').textContent=newBest?'// NEW PERSONAL BEST SIGNAL':'// PERSONAL BEST '+best().toLocaleString();
  if(win){shake=20;whiteFlash=.5;sfx('victory',1)}else sfx('fail',.9)
 }
-function toMenu(){clearDiscovery();if(!$('codexOverlay').classList.contains('hidden'))$('codexOverlay').classList.add('hidden');updateCodexCount();state='menu';keys.clear();mouse.down=false;hostileBullets=[];hazards=[];$('endOverlay').classList.add('hidden');$('severOverlay').classList.add('hidden');$('pauseOverlay').classList.add('hidden');$('upgradeOverlay').classList.add('hidden');$('hud').classList.add('hidden');$('menu').classList.remove('hidden');$('bestScore').textContent=String(best()).padStart(6,'0')}
+function toMenu(){communityCampaign=null;modVisuals=[];clearDiscovery();if(!$('codexOverlay').classList.contains('hidden'))$('codexOverlay').classList.add('hidden');updateCodexCount();state='menu';keys.clear();mouse.down=false;hostileBullets=[];hazards=[];$('endOverlay').classList.add('hidden');$('severOverlay').classList.add('hidden');$('pauseOverlay').classList.add('hidden');$('upgradeOverlay').classList.add('hidden');$('hud').classList.add('hidden');$('menu').classList.remove('hidden');$('bestScore').textContent=String(best()).padStart(6,'0')}
 function getInput(dt=1/60){
  let dx=Number(keys.has('d')||keys.has('arrowright'))-Number(keys.has('a')||keys.has('arrowleft'));
  let dy=Number(keys.has('s')||keys.has('arrowdown'))-Number(keys.has('w')||keys.has('arrowup'));
@@ -1848,6 +1886,7 @@ function silenceAttack(b){
  sfx('enemyArtillery',.62*(1-fatigue*.45),{x:b.x,y:b.y});
 }
 function step(dt){
+ for(const v of modVisuals)v.life-=dt;modVisuals=modVisuals.filter(v=>v.life>0);
  runTime+=dt;cycleTime+=dt;frame++;if(frame%12===0)modEmit('tick',{dt:12*dt,elapsed:runTime,cycle});
  player.resDuration=Math.max(0,player.resDuration-dt);player.overdriveTime=Math.max(0,player.overdriveTime-dt);player.frenzyTime=Math.max(0,player.frenzyTime-dt);player.phaseSlipTime=Math.max(0,player.phaseSlipTime-dt);
  if(grazeTimer>0){grazeTimer-=dt;if(grazeTimer<=0)grazeChain=0}
@@ -1894,7 +1933,9 @@ function step(dt){
   if(frame%20===(i*5)%20){let t=nearestEnemy(ox,oy,280);if(t)shoot(ox,oy,Math.atan2(t.y-oy,t.x-ox),'orb',.9,{color:'#a9e9ff'})}
   for(let e of enemies){if(!e.dead&&hyp(e.x-ox,e.y-oy)<e.r+12&&frame%18===0)damageEnemy(e,3.3,true)}
  }}
- const act=Math.ceil(cycle/4),bossRoom=cycle%4===0;
+ const act=Math.ceil(cycle/4),bossRoom=!communityCampaign&&cycle%4===0;
+ if(communityCampaign)updateCommunityRoom();
+ if(!communityCampaign){
  if(!bossRoom&&cycleTime>=durations[cycle]&&roomSpawned===roomSpawnTarget&&!roomPurging){
   roomPurging=true;setToast('ALL REINFORCEMENTS DEPLOYED // ELIMINATE EVERY HOSTILE',3.5);
   setAlert('ROOM '+(((cycle-1)%4)+1)+' / 3','PURGE PROTOCOL','THE ASSAULT ENDS ONLY WHEN THE FIELD IS CLEAR.',2.4);sfx('warning',.57);
@@ -1958,10 +1999,12 @@ function step(dt){
   }
   hazardClock=bossRoom?rand(9,13):act===4?rand(13.0,14.8)-(cycle-13)*2.2-threat*.35:rand(7.5,11.5)-threat*.65;
  }
+ } // End of canonical encounter and hazard scheduling.
  for(let e of enemies){
   if(e.dead)continue;const priorX=e.x,priorY=e.y;let ed=dt*slow;e.age+=ed;e.flash=Math.max(0,e.flash-dt*5);e.slow=Math.max(0,(e.slow||0)-dt);
   let dx=player.x-e.x,dy=player.y-e.y,d=hyp(dx,dy)||1,nx=dx/d,ny=dy/d,vx=nx,vy=ny;
-  if(e.type==='needle'){
+  if(e.scripted){vx=e.scriptVX||0;vy=e.scriptVY||0}
+  else if(e.type==='needle'){
    vx=nx*.5-ny*.86;vy=ny*.5+nx*.86;e.fireCd-=ed;
    if(e.fireCd<=0){const a=Math.atan2(dy,dx);enemyFire(e.x,e.y,a,245+(cycle-13)*10,cycle>=14?3:2,.26,'#bda1ff',4);e.fireCd=rand(1.63,2.10)-(cycle-13)*.14-threat*.08}
   }else if(e.type==='prism'){
@@ -2115,9 +2158,12 @@ function step(dt){
  }
  enemies=enemies.filter(e=>!e.dead);
  if(comboTimer>0){comboTimer-=dt;if(comboTimer<=0)combo=0}
- if(!bossRoom&&cycle<13&&roomNumber()%2===0&&!midDraftGranted&&roomKills>=Math.ceil(roomSpawnTarget*.6)){
+ if(!communityCampaign&&!bossRoom&&cycle<13&&roomNumber()%2===0&&!midDraftGranted&&roomKills>=Math.ceil(roomSpawnTarget*.6)){
   midDraftGranted=true;draftPhase='mid';showDraft('gear');setToast('FIELD UPGRADE READY // 60% OF PLANNED TARGETS DOWN',2.8);
- }else if(!bossRoom&&roomPurging&&roomSpawned===roomSpawnTarget&&enemies.length===0){nextCycle();}
+ }else if(!communityCampaign&&!bossRoom&&roomPurging&&roomSpawned===roomSpawnTarget&&enemies.length===0){nextCycle();}
+ if(frame%6===0&&modBus?.status().enabled){
+  modEmit('simulation:tick',{dt:.1,time:runTime,roomTime:cycleTime,player:{x:player.x,y:player.y,hp:player.hp,maxHp:player.maxHp},actors:enemies.filter(e=>e.scripted&&!e.dead).slice(0,50).map(e=>({id:e.id,type:e.modType,x:e.x,y:e.y,hp:e.hp,maxHp:e.maxHp,vx:e.scriptVX,vy:e.scriptVY})),campaign:communityCampaign?{id:communityCampaign.id,room:communityCampaign.index}:null});
+ }
  if(frame%5===0)updateHud();songTick(dt);
 }
 function damageEnemy(e,d,passive=false,x=e.x,y=e.y,weapon=null){
@@ -2125,7 +2171,7 @@ function damageEnemy(e,d,passive=false,x=e.x,y=e.y,weapon=null){
  const crit=weapon?weapon.crit:player.crit,execute=weapon?weapon.execute:player.execute,chain=weapon?weapon.chain:player.chain;
  if(Math.random()<crit)d*=2;
  if(execute&&e.hp/e.maxHp<.35)d*=1+execute*.6;
- e.hp-=d;e.flash=.2;addParticles(x,y,e.color,3,.35);
+ e.hp-=d;if(e.scripted)modEmit('actor:damage',{id:e.id,type:e.modType,hp:Math.max(0,e.hp),maxHp:e.maxHp,damage:d});e.flash=.2;addParticles(x,y,e.color,3,.35);
  if(Math.random()<.1&&!passive)sfx('hit',.2);
  if(chain>0&&!passive&&frame%5===0){let others=enemies.filter(q=>q!==e&&!q.dead&&dist(e,q)<240).slice(0,chain);
   for(let q of others){q.hp-=d*.58;addRing(q.x,q.y,'#8cdfff',4,22,.22);rings.push({x:e.x,y:e.y,toX:q.x,toY:q.y,beam:true,color:'#9ceaff',life:.14,max:.14});if(q.hp<=0&&!q.dead)killEnemy(q)}
@@ -2530,8 +2576,10 @@ function drawEnemies(){
  for(const e of enemies){
   if(e.dead)continue;
   const t=wallTime+e.phase,rotate=e.type==='spinner'?t*1.15:e.type==='wisp'?t*.8:e.type==='weaver'?t*.65:e.type==='bulwark'?t*.22:e.type==='splitter'?t*.35:e.type==='corsair'||e.type==='needle'?Math.atan2(player.y-e.y,player.x-e.x):e.type==='vesper'?t*.48:e.type==='prism'?-t*.22:e.type==='sniper'?(e.fireCd<3.7?e.aimAngle:Math.atan2(player.y-e.y,player.x-e.x)):e.type==='charger'?(e.windup>0||e.dashCd>0&&hyp(e.chargeVx,e.chargeVy)>100?e.aimAngle:Math.atan2(player.y-e.y,player.x-e.x)):e.type==='interceptor'?e.heading:0;
-  const s=e.r*(e.type==='bulwark'?3.6:3.9),im=enemySprite(e.type,e.color);
-  ctx.save();ctx.translate(e.x,e.y);ctx.rotate(rotate);ctx.drawImage(im,-s/2,-s/2,s,s);
+  const s=e.r*(e.type==='bulwark'?3.6:3.9),im=e.scripted?null:enemySprite(e.type,e.color);
+  ctx.save();ctx.translate(e.x,e.y);ctx.rotate(rotate);
+  if(e.scripted){ctx.shadowColor=e.color;ctx.shadowBlur=15;ctx.lineWidth=2.5;ctx.strokeStyle=e.color;ctx.fillStyle='#112235';ctx.beginPath();polygon(e.spriteSides||6,e.r*1.25,wallTime*.15);ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(0,0,e.r*.38,0,TAU);ctx.fillStyle=e.color;ctx.fill()}
+  else ctx.drawImage(im,-s/2,-s/2,s,s);
   if(e.flash>0){ctx.globalAlpha=Math.min(.72,e.flash*4);ctx.fillStyle='#f7ffff';ctx.beginPath();ctx.arc(0,0,e.r*.53,0,TAU);ctx.fill()}
   if(e.type==='charger'&&e.windup>0){ctx.strokeStyle='#ffecff';ctx.globalAlpha=.65+.35*Math.sin(wallTime*30);ctx.lineWidth=2.2;ctx.beginPath();ctx.arc(0,0,e.r*1.8,0,TAU);ctx.stroke()}
   if(e.type==='interceptor'){
@@ -2544,8 +2592,8 @@ function drawEnemies(){
   }
   if(e.type==='sniper'&&e.fireCd<1.2){ctx.strokeStyle='#ff7285';ctx.globalAlpha=.6;ctx.lineWidth=1.5;ctx.setLineDash([3,7]);ctx.beginPath();ctx.arc(0,0,e.r*1.6,0,TAU);ctx.stroke();ctx.setLineDash([])}
   ctx.restore();
-  if(e.hp<e.maxHp&&e.type!=='wisp'){const w=e.r*2.1;ctx.fillStyle='#153046';ctx.fillRect(e.x-w/2,e.y-e.r-13,w,3);ctx.fillStyle=e.color;ctx.fillRect(e.x-w/2,e.y-e.r-13,w*e.hp/e.maxHp,3)}
- }
+  if(e.hp<e.maxHp&&(e.type!=='wisp'||e.scripted)&&!e.actorBoss){const w=e.r*2.1;ctx.fillStyle='#153046';ctx.fillRect(e.x-w/2,e.y-e.r-13,w,3);ctx.fillStyle=e.color;ctx.fillRect(e.x-w/2,e.y-e.r-13,w*e.hp/e.maxHp,3)}
+ } const crown=enemies.find(e=>e.scripted&&e.actorBoss&&!e.dead);if(crown)drawBossBar(crown,crown.color,crown.actorName.toUpperCase());
 }
 /*
  * DO NOT EDIT — PROJECT-OWNER AUTHORIZATION REQUIRED.
@@ -3211,7 +3259,16 @@ function drawHazards(){
   ctx.restore();
  }
 }
-function render(){bg();if(cycle>=13&&state!=='menu'){ctx.save();ctx.fillStyle='rgba(26,9,56,.18)';ctx.fillRect(0,0,vw,vh);ctx.restore()}if(state==='menu'){drawMenuArt();return}if(state==='end'&&finalFlag&&boss){drawMenuArt()}ctx.save();if(shake>0){ctx.translate(rand(-shake,shake),rand(-shake,shake))}if(player?.resDuration>0){const fade=clamp(player.resDuration/1.5,0,1);ctx.globalAlpha=.12*(.28+.72*fade);ctx.fillStyle='#9064e0';ctx.fillRect(0,0,vw,vh);ctx.globalAlpha=1}drawHazards();drawPickups();drawGhosts();drawEnemies();drawBoss();drawDeathCine();drawProjectiles();drawPlayer();drawEffects();drawThreatIndicators();drawReticle();if(pulseTime>0){ctx.save();ctx.globalAlpha=pulseTime*.09;ctx.fillStyle='#b9a1ff';ctx.fillRect(0,0,vw,vh);ctx.restore()}ctx.restore();if(whiteFlash>0){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='rgba(220,243,255,'+whiteFlash*.5+')';ctx.fillRect(0,0,cw,ch)}}
+function drawModVisuals(){
+ for(const v of modVisuals){const d=v.data;ctx.save();ctx.globalAlpha=Math.min(1,v.life/.16);ctx.lineWidth=d.width||2;ctx.strokeStyle=d.color||'#9cfaff';ctx.fillStyle=d.color||'#9cfaff';
+  if(d.kind==='circle'){ctx.beginPath();ctx.arc(d.x,d.y,d.radius,0,TAU);d.fill?ctx.fill():ctx.stroke()}
+  else if(d.kind==='line'){ctx.beginPath();ctx.moveTo(d.x,d.y);ctx.lineTo(d.x2,d.y2);ctx.stroke()}
+  else if(d.kind==='text'){ctx.font='bold '+d.size+'px ui-monospace,monospace';ctx.textAlign='center';ctx.fillText(d.text,d.x,d.y,320)}
+  else if(d.kind==='rect'){d.fill?ctx.fillRect(d.x,d.y,d.w,d.h):ctx.strokeRect(d.x,d.y,d.w,d.h)}
+  ctx.restore();
+ }
+}
+function render(){bg();if(cycle>=13&&state!=='menu'){ctx.save();ctx.fillStyle='rgba(26,9,56,.18)';ctx.fillRect(0,0,vw,vh);ctx.restore()}if(state==='menu'){drawMenuArt();return}if(state==='end'&&finalFlag&&boss){drawMenuArt()}ctx.save();if(shake>0){ctx.translate(rand(-shake,shake),rand(-shake,shake))}if(player?.resDuration>0){const fade=clamp(player.resDuration/1.5,0,1);ctx.globalAlpha=.12*(.28+.72*fade);ctx.fillStyle='#9064e0';ctx.fillRect(0,0,vw,vh);ctx.globalAlpha=1}drawHazards();drawPickups();drawGhosts();drawEnemies();drawBoss();drawDeathCine();drawProjectiles();drawPlayer();drawEffects();drawModVisuals();drawThreatIndicators();drawReticle();if(pulseTime>0){ctx.save();ctx.globalAlpha=pulseTime*.09;ctx.fillStyle='#b9a1ff';ctx.fillRect(0,0,vw,vh);ctx.restore()}ctx.restore();if(whiteFlash>0){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='rgba(220,243,255,'+whiteFlash*.5+')';ctx.fillRect(0,0,cw,ch)}}
 const FIXED=1/60;
 /*
  * DO NOT EDIT — PROJECT-OWNER AUTHORIZATION REQUIRED.
@@ -3237,7 +3294,7 @@ addEventListener('keydown',e=>{if(window.EchoRiftMods?.status().open)return;let 
  if(k==='f'&&e.shiftKey&&keys.has('u')){e.preventDefault();if(state==='admin')closeAdmin();else openAdmin();return}
  if(state==='admin')return;
  if(k==='b'&&state==='menu'&&$('codexOverlay').classList.contains('hidden')){e.preventDefault();openWordle();return}
- if(k==='p'||k==='escape'){if(state==='playing'||state==='paused')pause();return}if(k==='m'){toggleMute();setToast('SOUND '+(muted?'OFF':'ON'),1.2)}if(state==='menu'&&!$('codexOverlay').classList.contains('hidden'))return;if(state==='menu'&&(k==='enter'||k===' ')){reset();return}if(state==='upgrade'&&k==='r'){reroll();return}if(state==='upgrade'&&/^[1-9]$/.test(k)){chooseUpgrade(Number(k)-1);return}if(state==='playing'){if(k===' '||k==='shift')doDash();if(k==='e')doPulse();if(k==='f')toggleAuto()}else if(state==='end'&&(k==='enter'||k===' '))reset()});addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+ if(k==='p'||k==='escape'){if(state==='playing'||state==='paused')pause();return}if(k==='m'){toggleMute();setToast('SOUND '+(muted?'OFF':'ON'),1.2)}if(state==='menu'&&!$('codexOverlay').classList.contains('hidden'))return;if(state==='menu'&&(k==='enter'||k===' ')){reset();return}if(state==='upgrade'&&k==='r'){reroll();return}if(state==='upgrade'&&/^[1-9]$/.test(k)){chooseUpgrade(Number(k)-1);return}if(state==='playing'){if(!e.ctrlKey&&!e.altKey&&!e.metaKey)modEmit('input:press',{key:k});if(k===' '||k==='shift')doDash();if(k==='e')doPulse();if(k==='f')toggleAuto()}else if(state==='end'&&(k==='enter'||k===' '))reset()});addEventListener('keyup',e=>{const k=e.key.toLowerCase();keys.delete(k);if(state==='playing'&&!e.ctrlKey&&!e.altKey&&!e.metaKey)modEmit('input:release',{key:k})});
 function toggleAuto(){autoFire=!autoFire;resetAutoAim();$('touchAuto').style.borderColor=autoFire?'#a4ffb8':'#8ac6e8a0';$('touchAuto').style.color=autoFire?'#a4ffb8':'#e0f8ff';setToast('AUTO-AIM / FIRE '+(autoFire?'ENABLED':'DISABLED'),1.6)}
 function setTouchVisible(){ $('touchControls').style.display=touchMode&&state==='playing'?'block':'none'}
 const _reset=reset;reset=function(){_reset();setTouchVisible()};
@@ -3293,25 +3350,42 @@ const modNum=(x,min,max,otherwise=min)=>Number.isFinite(Number(x))?clamp(Number(
 const modHex=(c,otherwise='#9ceeff')=>typeof c==='string'&&/^#[0-9a-fA-F]{6}$/.test(c)?c:otherwise;
 modBus?.connect({
  snapshot(){return {
-  state,cycle,act:Math.ceil(cycle/4),difficulty:threat,score,kills,width:vw,height:vh,
+  state,cycle,act:Math.ceil(cycle/4),difficulty:threat,score,kills,width:vw,height:vh,campaign:communityCampaign?{id:communityCampaign.id,name:communityCampaign.name,room:communityCampaign.index,act:communityCampaign.actName}:null,
   player:player?{x:player.x,y:player.y,hp:player.hp,maxHp:player.maxHp,damage:player.damage,speed:player.speed,fireRate:player.fireRate,res:player.res}:null,
   boss:boss&&!boss.dead?{act:boss.act,x:boss.x,y:boss.y,hp:boss.hp,maxHp:boss.maxHp,phase:boss.phase}:null,
-  enemies:enemies.filter(e=>!e.dead).slice(0,150).map(e=>({id:e.id,type:e.modType||e.type,baseType:e.type,x:e.x,y:e.y,hp:e.hp,maxHp:e.maxHp}))
+  enemies:enemies.filter(e=>!e.dead).slice(0,150).map(e=>({id:e.id,type:e.modType||e.type,baseType:e.type,x:e.x,y:e.y,hp:e.hp,maxHp:e.maxHp,vx:e.motionVX||0,vy:e.motionVY||0}))
  }},
- apply(action,d){
+ startCampaign(spec){return startCommunityCampaign(spec)},
+ apply(action,d,owner){
   if(action==='toast'){
    const msg=String(d.text??'').slice(0,105).replace(/[\x00-\x1f]/g,'');
    if(msg)setToast(msg,modNum(d.seconds,.6,5,2));return;
   }
   if(state!=='playing'||!player)return;
   switch(action){
+   case 'steerActor':{
+    const id=Number(d.id);const e=enemies.find(x=>x.scripted&&x.actorOwner===owner&&x.id===id&&!x.dead);
+    if(!e)return;const vx=modNum(d.vx,-1,1,0),vy=modNum(d.vy,-1,1,0),mag=Math.max(1,hyp(vx,vy));
+    e.scriptVX=vx/mag;e.scriptVY=vy/mag;break;
+   }
+   case 'teleport':{
+    player.x=modNum(d.x,25,vw-25,player.x);player.y=modNum(d.y,25,vh-25,player.y);player.invuln=Math.max(player.invuln,.3);break;
+   }
+   case 'hazard':{
+    const x=modNum(d.x,35,vw-35,player.x),y=modNum(d.y,35,vh-35,player.y);
+    addHazard(x,y,modNum(d.radius,22,160,65),modNum(d.warning,.6,3,1.2));break;
+   }
+   case 'visual':{
+    if(modVisuals.length>=110)return;const kind=String(d.kind||'');if(!['circle','line','rect','text'].includes(kind))return;
+    modVisuals.push({life:modNum(d.life,.07,2,.3),data:{kind,x:modNum(d.x,0,vw,100),y:modNum(d.y,0,vh,100),x2:modNum(d.x2,0,vw,250),y2:modNum(d.y2,0,vh,200),radius:modNum(d.radius,1,300,25),w:modNum(d.w,1,350,45),h:modNum(d.h,1,350,30),width:modNum(d.width,.5,10,2),size:modNum(d.size,9,40,17),text:String(d.text||'').slice(0,60),color:modHex(d.color),fill:!!d.fill}});break;
+   }
    case 'heal':{
     const amount=modNum(d.amount,0,40,0);player.hp=Math.min(player.maxHp,player.hp+amount);updateHud();break;
    }
    case 'score':score+=Math.floor(modNum(d.points,0,2000,0));break;
    case 'spawnEnemy':{
     const type=String(d.type||'');
-    if(!(type in ENEMY_BASE_STATS)&&!modBus?.enemyDefinition(type))return;
+    if(!(type in ENEMY_BASE_STATS)&&!modBus?.enemyDefinition(type)&&!modBus?.actorDefinition(type))return;
     if(enemies.length>=125)return;
     spawnEnemy(type,false,{x:d.x,y:d.y});break;
    }
@@ -3355,7 +3429,7 @@ setupAdmin();
 setTimeout(prewarmSoundIdle,600);
 addEventListener('resize',resize);resize();$('bestScore').textContent=String(best()).padStart(6,'0');setTouchVisible();requestAnimationFrame(loop);
 // Debug-friendly telemetry for automated browser smoke tests, intentionally read-only.
-Object.defineProperty(window,'echoRiftStatus',{get:()=>({state,cycle,score,health:player?.hp||0,enemies:enemies.length,echoes:echoes.length,boss:boss?.hp??null, bossAct:boss?.act??null,deathAnimation:deathCine?{act:deathCine.act,t:deathCine.t}:null,severed,upgradeMode,draftStep,roomPurging,roomTimer:cycleTime,spawnEnd:durations[cycle],roomSpawnTarget,roomSpawned,roomKills,roomYellowSpawned,roomInterceptorSpawned,midDraftGranted,draftPhase,upgrades:{...picks},totalMods,rerolls,recordedFrames:recording.length,codexUnlocked:CODEX.filter(x=>codexFound(x.id)).length,autoTarget:autoAimId,autoAimError:Number.isFinite(autoAimError)?autoAimError:null,autoAimAngle,autoAimAligned:autoAimError<=AUTO_FIRE_CONE,echoWeapons:echoes.map(e=>({...e.weapon})),threat,overdrive:player?.overdriveTime||0})});
+Object.defineProperty(window,'echoRiftStatus',{get:()=>({state,cycle,communityCampaign:communityCampaign?{id:communityCampaign.id,index:communityCampaign.index,name:communityCampaign.name}:null,score,health:player?.hp||0,enemies:enemies.length,echoes:echoes.length,boss:boss?.hp??null, bossAct:boss?.act??null,deathAnimation:deathCine?{act:deathCine.act,t:deathCine.t}:null,severed,upgradeMode,draftStep,roomPurging,roomTimer:cycleTime,spawnEnd:durations[cycle],roomSpawnTarget,roomSpawned,roomKills,roomYellowSpawned,roomInterceptorSpawned,midDraftGranted,draftPhase,upgrades:{...picks},totalMods,rerolls,recordedFrames:recording.length,codexUnlocked:CODEX.filter(x=>codexFound(x.id)).length,autoTarget:autoAimId,autoAimError:Number.isFinite(autoAimError)?autoAimError:null,autoAimAngle,autoAimAligned:autoAimError<=AUTO_FIRE_CONE,echoWeapons:echoes.map(e=>({...e.weapon})),threat,overdrive:player?.overdriveTime||0})});
 })();
 /*
  * DO NOT EDIT — PROJECT-OWNER AUTHORIZATION REQUIRED.
