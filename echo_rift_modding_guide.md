@@ -1,4 +1,4 @@
-# ECHO//RIFT: REQUIEM — Community Mod API 2.0
+# ECHO//RIFT: REQUIEM — Community Mod API 3.1
 
 **Format:** plain `.js` file · **Entry:** main menu → MODS → INSTALL → ENABLE  
 **Required host files:** `echo_rift_requiem.html` + `echo_rift_mod_api.js`  
@@ -9,6 +9,102 @@
 Mods can now create their own **main-menu buttons**, open **fully custom HTML/CSS/JavaScript screens**, add **independent multi-act campaigns**, create **entirely script-driven enemies**, and implement **new mechanics** with sandbox-driven simulation ticks, steering, projectiles, hazards, teleportation and custom drawing. The original 4-act game is not replaced or rewritten; custom campaigns are selectable alternate runs.
 
 This is a foundation for genuinely custom experiences, not unlimited access to the host engine. Entirely new physics/collision models, native audio streams, multiplayer servers, arbitrary custom shaders and unbounded access to the DOM/engine are *not* provided. No stable third-party API can promise literally any feature without exposing the whole host process. APIs here are intentionally separated and may be expanded in future releases.
+
+
+## API 3.1 — Full Engine Mode (advanced, unrestricted *inside an isolated game*)
+
+**This is the answer to wanting to rewrite REQUIEM rather than merely use hooks.** On the main menu, open **MODS → FULL ENGINE MODE → IMPORT .JS PATCH → LAUNCH MODDED GAME**. The lab loads a completely fresh, temporary copy of the REQUIEM engine in a browser iframe with `sandbox="allow-scripts"` (no `allow-same-origin`). Your patch is evaluated **directly inside the game engine's IIFE scope**, after the engine has initialized. This allows full control over its existing functions, variables, internal arrays, player and enemy rules, rendering functions, and cloned game DOM. You do not need to use `RequiemMod` for lab patches.
+
+A lab patch can reassign functions, change constants *where mutable*, extend enemy AI, directly use the canvas and UI, replace boss patterns and make original game modes. It has roughly the same creative latitude as directly editing the source *at runtime*, without rewriting or distributing the original HTML. It is not a code-rewriting compiler: `const` bindings cannot be reassigned, and code executed before patch injection cannot be retroactively changed. For deeper replacements, intercept later calls, modify mutable tables/objects, or build your own runtime systems.
+
+Example patch (`example_engine_lab_patch.js`):
+
+```js
+// These names are in the game's lexical engine scope, NOT on the website.
+const vanillaSilence = silenceAttack;
+silenceAttack = function (boss) {
+  vanillaSilence(boss);  // preserve existing attacks
+  // You can add entirely new patterns here using game functions, or
+  // replace the function body and draw or fire anything you want.
+};
+// Alter cloned REQUIEM's DOM; the real host menu is unaffected.
+const tag = document.createElement('div');
+tag.textContent = 'CUSTOM ENGINE PATCH ACTIVE';
+tag.style.cssText = 'position:fixed;left:15px;top:12px;color:#8fffe9;z-index:99';
+document.body.append(tag);
+```
+
+**Security boundary:** the lab frame has a unique opaque origin. It cannot read the original site's localStorage, cookies, DOM, or the live REQUIEM game state. It cannot navigate the top-level page, submit forms, or open popups. The frame permits external HTTPS scripts, images, media, fonts, styles and fetches so mods can use asset pipelines and external services (subject to CORS). Inline JavaScript, dynamic compilation, blob workers and CSS are permitted within the isolated copy. Frame embedding and form submission remain blocked; the mod still cannot read or modify website-origin storage or DOM. Requests to third-party services can reveal the player’s IP address and request metadata. Browser sandbox/CSP defence is not a guarantee against exploits or CPU/memory exhaustion. Only run mods from people you trust; arbitrary code can intentionally break or freeze the *lab instance*. The lab does not have a save bridge to the main website and does not retain progress after you close it. The regular Mod API runs separately and continues to use its controlled postMessage bridge.
+
+**Performance:** launching a lab runs a second complete game and temporarily uses extra memory/CPU. Close the lab to destroy its iframe. **Compatibility:** lab patches targeting specific engine internals may need changes when REQUIEM updates. Mods distributed for the public API are more version-stable.
+
+### Why an isolated origin remains
+
+The public website does not need accounts or a server database to have browser-local information. REQUIEM records progress and imported mods in browser storage, and a same-origin unrestricted script could access those values and make network requests. Full Engine Mode deliberately keeps the script in its own origin while giving it the entire *cloned* game engine. **This is not a content limitation**: mods can rewrite mechanics, replace menus, draw to canvas, use libraries, load external assets, and implement alternate games. The only excluded authority is control over the actual host page or its stored information.
+
+## API 3.0 — New creative systems
+
+**The previous API (custom HTML menus, multi-act expeditions, custom AI, custom sprite layers, scripted abilities) remains available.** Version 3.0 adds five new interfaces rather than granting mods unsafe access to the host's internal objects.
+
+### Per-mod storage (persistent, namespaced)
+
+```js
+const setting = await RequiemMod.storage.get('my-setting'); // JSON value or null
+const saved = await RequiemMod.storage.set('my-setting', { enabled: true, level: 4 }); // boolean
+const keys = await RequiemMod.storage.keys(); // string[]
+await RequiemMod.storage.remove('my-setting'); // boolean
+```
+
+Storage is namespaced to the *installed mod*, not to the mod's displayed name. Data persists across reloads and disable/enable; uninstall deletes that installation's data. Per mod: 64 keys maximum, keys of 1–64 ASCII alphanumeric/underscore/dot/colon/hyphen characters, each JSON value up to 8 KB serialized, 32 KB total serialized. Storage is subject to the browser's own localStorage limits. Calls return Promises. Unlike the iframe's own opaque-origin storage, the host stores JSON for the mod and does not expose other mods' keys.
+
+### Custom in-game HUD readouts
+
+```js
+RequiemMod.hud.set('charges', {label:'MY ABILITY', value:'3 / 3', color:'#94e8ff'});
+RequiemMod.hud.set('charges', {label:'MY ABILITY', value:'2 / 3', color:'#ffbb88'});
+RequiemMod.hud.remove('charges');
+```
+
+HUD content is plain text, never HTML. Readouts are removed automatically on disable. Total across all mods: 24 readouts. Avoid updating unchanged values every simulation tick.
+
+### Procedural sounds
+
+```js
+RequiemMod.audio.tone({frequency:660,endFrequency:330,duration:.2,volume:.05,wave:'triangle'});
+```
+
+Oscillator options: `frequency` 80–1800 Hz; `endFrequency` 70–1900 Hz; `duration` .025–.75 seconds; `volume` 0–.15; `wave`: sine, triangle, square, sawtooth. Sounds respect the game's audio settings and browser audio-unlock requirements. They are routed through the game's limiter; this is not file-based audio playback.
+
+### Actor runtime control (only actors belonging to your own mod)
+
+```js
+RequiemMod.actor.set(actor.id, {x:400, y:220, speed:200, hp:35, color:'#eeaaff'});
+RequiemMod.actor.damage(actor.id, 10);
+RequiemMod.actor.remove(actor.id);
+```
+
+Only the calling mod's scripted actors can be changed; native enemies, Wardens, and another mod's actors are protected. Positions are clamped inside the playable arena. Speed 0–700; health 1–max health. `remove` removes a scripted actor directly and does not award a normal kill.
+
+### New player mechanics
+
+```js
+RequiemMod.player.impulse(80,-25); // move player by bounded displacement
+RequiemMod.player.shield(.6); // temporary invulnerability, up to 2s per call
+```
+
+Player displacement is clamped to screen bounds (±180 game units per axis, per call). Invulnerability uses the normal player hit system. Mods are rate-limited to 250 commands per second so these abilities should manage their own cooldowns. For production mods, clearly communicate what the ability does and avoid interfering with the player's normal input without warning.
+
+### Transient polygon drawing
+
+```js
+RequiemMod.draw({kind:'polygon',x:300,y:200,sides:6,radius:45,angle:Math.PI/6,color:'#bbffaa',fill:false,life:.4,width:3});
+```
+
+Like circle, line, rectangle and text effects, polygon drawing is time-limited and validated by the host; this does *not* give direct access to the game's canvas context.
+
+### What remains outside the public API
+
+The API does **not** grant host DOM access, unrestricted main-engine JavaScript execution, arbitrary external fetches, custom native shaders, a new physics engine, server-side multiplayer, or arbitrary asset ingestion. These would require dedicated interfaces and security reviews. Sandboxing protects the website against many cross-origin abuses but does not make untrusted JavaScript completely harmless (e.g. CPU-intensive loops). Test mods and only enable code you trust.
 
 ## Minimal mod
 
@@ -66,7 +162,7 @@ RequiemMod.defineActor({
 
 Set `boss:true` on a scripted actor to display a full boss health bar during its encounter (the sample Eclipse Crown uses this). Boss actors still participate in the ordinary collision/death system, so the mod defines their phases and attacks.
 
-Actors are **true game enemies** for collision, targeting, projectile damage, HP, death, scoring and victory conditions, but they do **not** inherit the built-in enemy movement or attack logic. The mod decides what they do. Actors render as glowing polygons (3–12 sides). Supported limits: HP 5–2,000, speed 0–700, radius 8–75, score 0–5,000, 36 distinct actor definitions globally.
+Actors are **true game enemies** for collision, targeting, projectile damage, HP, death, scoring and victory conditions, but they do **not** inherit the built-in enemy movement or attack logic. The mod decides what they do. Actors support custom layered sprite artwork (up to 24 validated shapes), or fall back to glowing polygons (3–12 sides). Supported limits: HP 5–2,000, speed 0–700, radius 8–75, score 0–5,000, 36 distinct actor definitions globally.
 
 Spawn one using:
 
@@ -76,6 +172,28 @@ RequiemMod.spawnActor('hunter',{x:500,y:120});
 ```
 
 In your campaign's `spawns` arrays, use just `'hunter'` as the type (same for ordinary built-in types such as `'charger'`). Your actor IDs are automatically namespaced per installed mod to avoid collisions. Actors cannot be spawned in menus or while paused.
+
+
+### Custom layered actor artwork (API 2.1)
+
+Scripted actors **no longer have to look like glowing polygons**. Add a `sprite` descriptor to `defineActor`. All coordinates and dimensions are relative to the actor's `radius`, with origin at its centre. Parts draw in array order (back to front). Shapes are validated data, not executable canvas functions.
+
+```js
+RequiemMod.defineActor({
+ id:'manta',name:'Violet Manta',hp:95,speed:190,radius:24,color:'#a788ff',
+ sprite:{rotation:'face-player',parts:[
+  {kind:'polygon',sides:3,x:-.5,y:0,radius:.95,angle:-1.57,color:'#7858e9'},
+  {kind:'polygon',sides:3,x:.5,y:0,radius:.95,angle:1.57,color:'#7858e9'},
+  {kind:'polygon',sides:6,radius:.58,color:'#171832',lineWidth:2.5},
+  {kind:'circle',radius:.24,color:'#e7beff',stroke:false},
+  {kind:'circle',radius:1.1,color:'#a788ff',fill:false,opacity:.55,spin:1.7}
+ ]}
+});
+```
+
+Shapes: `polygon` (`sides` 3–16, `radius`), `circle` (`radius`), `rect` (`w`,`h`), and `line` (`x`,`y`,`x2`,`y2`). All parts support `x`, `y`, `angle` (radians), `spin` (radians/second), `color` (six-digit hex), `opacity`, `lineWidth`, `fill` and `stroke`. `rotation` is `static`, `spin` (set a top-level `spin` speed), `face-player`, or `face-motion`. A sprite has up to 24 parts. These designs are drawn by the existing game canvas engine with collision radius unchanged. Without `sprite`, the original simple polygon remains as a fallback.
+
+**Important:** This is extensive *declarative vector artwork*, not unrestricted execution in the host renderer. Mods can already draw temporary battlefield effects with `RequiemMod.draw`. External bitmap files, textures, custom shaders, and per-frame Canvas callbacks are not supported; allowing arbitrary scripts inside the host would defeat the mod security boundary.
 
 ## 4. Script novel movement and attacks
 
@@ -199,4 +317,4 @@ example_requiem_mod.js
 
 The **GitHub loader on your Linode VPS does not need to be replaced** if you're already using the v1 mod-enabled two-file loader. That loader fetches both the core HTML and the separate API JavaScript on each visit. If your site still uses the old single-file loader, install the two-file loader from the package first. Reopen the game after pushing both files; refresh with cache bypass if necessary.
 
-**API 2.0 is experimental:** documented v1 mod calls are retained, and 2.0 adds opt-in modes/hooks. Future revisions may add custom collision geometry, animated sprites, custom upgrades within community expeditions, richer drawing APIs, HUD widgets, audio, and mod-to-mod interoperability. These are not implemented today.
+**API 3.0 is experimental:** documented v1 mod calls are retained, and 2.0 adds opt-in modes/hooks. Future revisions may add custom collision geometry, animated sprites, custom upgrades within community expeditions, richer drawing APIs, HUD widgets, audio, and mod-to-mod interoperability. These are not implemented today.

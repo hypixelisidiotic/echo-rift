@@ -7,9 +7,9 @@ RequiemMod.register({
 });
 
 // No built-in behaviour is inherited: the mod controls these units every 100ms.
-RequiemMod.defineActor({id:'seek',name:'Eclipse Seeker',hp:44,speed:155,radius:17,color:'#5dffe0',sides:3,score:160});
-RequiemMod.defineActor({id:'orbit',name:'Orbit Sentinel',hp:110,speed:120,radius:23,color:'#ffd28a',sides:7,score:280});
-RequiemMod.defineActor({id:'crown',name:'Eclipse Crown',hp:850,speed:62,radius:54,color:'#e49cff',sides:9,score:1800,boss:true});
+RequiemMod.defineActor({id:'seek',name:'Eclipse Seeker',hp:44,speed:155,radius:17,color:'#5dffe0',sides:3,score:160,sprite:{rotation:'face-player',parts:[{kind:'polygon',sides:3,radius:1.2,color:'#274e58'},{kind:'polygon',sides:3,radius:.76,color:'#54eacb'},{kind:'circle',y:.16,radius:.26,color:'#e1fff9',stroke:false},{kind:'line',x:-.86,y:.42,x2:.86,y2:.42,color:'#b4fff3',lineWidth:2}]}});
+RequiemMod.defineActor({id:'orbit',name:'Orbit Sentinel',hp:110,speed:120,radius:23,color:'#ffd28a',sides:7,score:280,sprite:{rotation:'spin',spin:.65,parts:[{kind:'circle',radius:1.2,color:'#f6af61',fill:false,lineWidth:3},{kind:'rect',w:1.4,h:.36,color:'#ffc972',angle:.785},{kind:'rect',w:1.4,h:.36,color:'#ffc972',angle:-.785},{kind:'polygon',sides:6,radius:.57,color:'#33263e'},{kind:'circle',radius:.22,color:'#fff1cb',stroke:false}]}});
+RequiemMod.defineActor({id:'crown',name:'Eclipse Crown',hp:850,speed:62,radius:54,color:'#e49cff',sides:9,score:1800,boss:true,sprite:{rotation:'spin',spin:-.18,parts:[{kind:'polygon',sides:5,radius:1.15,color:'#8e49b0',fill:false,lineWidth:4},{kind:'polygon',sides:5,radius:.92,color:'#24203f',angle:.628},{kind:'circle',radius:.65,color:'#d39aff',fill:false,lineWidth:3,spin:.9},{kind:'polygon',sides:3,radius:.57,color:'#eabaed',angle:3.14},{kind:'circle',radius:.18,color:'#ffffff',stroke:false}]}});
 
 RequiemMod.defineCampaign({
  id:'eclipse',name:'ECLIPSE EXPEDITION',
