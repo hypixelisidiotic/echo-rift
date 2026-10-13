@@ -2587,12 +2587,15 @@ function drawEnemies(){
     ctx.lineJoin='round';
     for(const p of art.parts){
      ctx.save();ctx.globalAlpha=p.opacity;ctx.translate(p.x*e.r,p.y*e.r);ctx.rotate(p.angle+wallTime*p.spin);
-     ctx.strokeStyle=p.color;ctx.fillStyle=p.color;ctx.lineWidth=p.lineWidth;
+     ctx.strokeStyle=p.color;ctx.fillStyle=p.color;ctx.lineWidth=p.lineWidth;const pulse=1+(p.pulseDepth||0)*Math.sin(wallTime*(p.pulse||0)*TAU);ctx.scale(pulse,pulse);
      ctx.shadowColor=p.color;ctx.shadowBlur=8;
      ctx.beginPath();
      if(p.kind==='circle')ctx.arc(0,0,p.radius*e.r,0,TAU);
      else if(p.kind==='rect')ctx.rect(-p.w*e.r/2,-p.h*e.r/2,p.w*e.r,p.h*e.r);
      else if(p.kind==='line'){ctx.moveTo(0,0);ctx.lineTo((p.x2-p.x)*e.r,(p.y2-p.y)*e.r)}
+     else if(p.kind==='ellipse')ctx.ellipse(0,0,p.w*e.r/2,p.h*e.r/2,0,0,TAU);
+     else if(p.kind==='path'&&p.path){ctx.scale(e.r,e.r);try{const shape=new Path2D(p.path);if(p.fill)ctx.fill(shape);if(p.stroke)ctx.stroke(shape)}catch(_){}ctx.restore();continue}
+     else if(p.kind==='polyline'){for(let i=0;i<p.points.length;i++){const pt=p.points[i];if(!i)ctx.moveTo(pt[0]*e.r,pt[1]*e.r);else ctx.lineTo(pt[0]*e.r,pt[1]*e.r)}if(p.fill&&p.points.length>2)ctx.closePath()}
      else for(let k=0;k<=p.sides;k++){const a=k/p.sides*TAU-Math.PI/2;const x=Math.cos(a)*p.radius*e.r,y=Math.sin(a)*p.radius*e.r;if(k===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
      if(p.fill&&p.kind!=='line')ctx.fill();if(p.stroke||p.kind==='line')ctx.stroke();
      ctx.restore();

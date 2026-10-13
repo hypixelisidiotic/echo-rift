@@ -318,3 +318,26 @@ example_requiem_mod.js
 The **GitHub loader on your Linode VPS does not need to be replaced** if you're already using the v1 mod-enabled two-file loader. That loader fetches both the core HTML and the separate API JavaScript on each visit. If your site still uses the old single-file loader, install the two-file loader from the package first. Reopen the game after pushing both files; refresh with cache bypass if necessary.
 
 **API 3.0 is experimental:** documented v1 mod calls are retained, and 2.0 adds opt-in modes/hooks. Future revisions may add custom collision geometry, animated sprites, custom upgrades within community expeditions, richer drawing APIs, HUD widgets, audio, and mod-to-mod interoperability. These are not implemented today.
+
+## Custom models for Standard API mods (new)
+
+**The Standard API supports original, persistent enemy artwork without Full Engine Mode.** Pass `sprite` to `RequiemMod.defineActor()`. No default octagon is rendered when a sprite is supplied. Modders can draw completely custom silhouettes with **SVG path syntax** (`M`, `L`, `C`, `Q`, `A`, `Z`, etc.) which the game's canvas renders using `Path2D`. Shapes are expressed in local coordinates relative to the actor's hit radius (for example `1` means one radius).
+
+```javascript
+RequiemMod.defineActor({
+  id:'bladefish',name:'BLADEFISH',hp:120,speed:185,radius:22,
+  sprite:{rotation:'face-player',parts:[
+    {kind:'path',path:'M -1.4 0 C -.8 -1.2 .8 -1.2 1.5 0 C .8 1.2 -.8 1.2 -1.4 0 Z',color:'#254969',fill:true,stroke:true,lineWidth:2},
+    {kind:'path',path:'M -.8 0 L .35 -.3 L 1.2 0 L .35 .3 Z',color:'#9beaff'},
+    {kind:'ellipse',w:.45,h:.5,x:.5,color:'#fff0fa',pulse:2,pulseDepth:.15}
+  ]}
+});
+```
+
+Kinds: `path` (arbitrary vector outline using path string), `polyline` (array of `[x,y]` pairs), `ellipse`, `polygon`, `circle`, `rect`, `line`. `path` supports curves and open/closed shapes and is rendered as filled/stroked canvas geometry. Layers are painted back-to-front; up to **96 components**. Each component can animate independently with `angle`, `spin` (radians per second), `pulse` (cycles per second), `pulseDepth` (fractional scale amount), `opacity`, `color`, `fill`, `stroke`, and `lineWidth`. `rotation` at sprite level accepts `static`, `spin`, `face-player`, `face-motion`. Coordinates relative to hit radius; complex paths allow arbitrarily shaped silhouettes. Paths are interpreted as drawing instructions, never as HTML or JavaScript.
+
+`polyline` example: `{kind:'polyline',points:[[-1,-.5],[0,-1],[1,.5],[0,1]],color:'#ff99cc',fill:true}`. Ellipse example: `{kind:'ellipse',w:2.2,h:.8,color:'#9beaff',fill:false}`.
+
+For advanced or externally generated art, author curves as SVG path data and copy them into a mod sprite descriptor. Sprite rendering stays attached to each actor during movement and damage; do **not** use one-second `RequiemMod.draw()` calls to fake permanent body components. Use `draw()` only for transient attack telegraphs, trails and other effects. Collision is still based on actor `radius`; sprite geometry can extend outside that circle and won't automatically change hitboxes. SVG paths are not the same as loading arbitrary SVG files or running arbitrary renderer callbacks. If you need raster images or shader pipelines, those require separate support.
+
+**Worked mod:** `act_zero_pale_hour_custom_models.js` converts the five Act 0 enemies into distinctive permanent designs without changing their movement/attack AI. It is a Standard API mod; install through MODS, not Full Engine Lab.
